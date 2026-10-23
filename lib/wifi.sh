@@ -71,11 +71,15 @@ wifi_scan_data() {
                     print name "\t" $3 "\t" $4 "\t" $2
             }'
     else
-        # An iw scan usually requires CAP_NET_ADMIN. Never elevate automatically.
-        raw=$("${WIFI_IW:-iw}" dev "$iface" scan 2>/dev/null) || {
-            echo 'Error: Scan unavailable. Configure an accessible wpa_supplicant control socket, or grant explicit scan permissions.' >&2
-            return 1
-        }
+        # Inspect cached scan results first; an active scan may need
+        # CAP_NET_ADMIN. Never elevate automatically or restart services.
+        raw=$("${WIFI_IW:-iw}" dev "$iface" scan dump 2>/dev/null) || raw=''
+        if [ -z "$raw" ]; then
+            raw=$("${WIFI_IW:-iw}" dev "$iface" scan 2>/dev/null) || {
+                echo 'Error: Scan unavailable. Configure an accessible wpa_supplicant control socket, or grant explicit scan permissions.' >&2
+                return 1
+            }
+        fi
         printf '%s\n' "$raw" | awk '
             function emit() {
                 if (name != "") print name "\t" signal "\t" security "\t" frequency
