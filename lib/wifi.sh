@@ -14,7 +14,9 @@ wifi_interface() {
     iface=$("${WIFI_IW:-iw}" dev 2>/dev/null |
         awk '$1 == "Interface" { print $2; exit }')
     [ -n "$iface" ] || {
-        echo 'Error: No Wi-Fi interface found. Set WIFI_INTERFACE if necessary.' >&2
+        echo 'Error: No wireless interface reported by iw dev.' >&2
+        echo 'Check hardware/driver visibility. VirtualBox NAT and bridged adapters are Ethernet, not Wi-Fi.' >&2
+        echo 'Set WIFI_INTERFACE only when a real wireless interface exists.' >&2
         return 1
     }
     printf '%s\n' "$iface"
