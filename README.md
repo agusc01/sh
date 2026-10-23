@@ -37,7 +37,7 @@ automatically using `iw dev`, or set `WIFI_INTERFACE=wlan0`.
 
 A reachable `wpa_cli` control socket is necessary for nonprivileged cached
 scans and `wifi_saved`. Without one, scripts fall back to `iw` where possible.
-`iw dev IFACE scan` often requires elevated permissions. This installer
+`iw dev IFACE scan` often requires elevated permissions; the scripts try `iw dev IFACE scan dump` first. This installer
 does not add privileged rules, modify `ctrl_interface`, or enable network
 management. Alpine's [Wi-Fi guide](https://wiki.alpinelinux.org/wiki/Wi-Fi)
 documents the optional control socket and its access permissions; granting
