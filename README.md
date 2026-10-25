@@ -168,3 +168,82 @@ Check the actual `-c` path in the running process before assuming the above
 file is in use. A missing or zero `update_config` disables persistence.
 Editing the active root-managed file and restarting the daemon should be a
 separate deliberate admin task, since restarting drops the current association.
+
+
+## Wi-Fi IP status, Internet checks, and DHCP renewal (Alpine)
+
+Wi-Fi association, an IPv4 address, a default route, DNS and Internet access
+are separate states. Alpine typically uses ifupdown-ng and BusyBox udhcpc.
+
+Read-only diagnostic commands:
+
+    wifi_status
+    wifi_ip_status
+    wifi_internet_status
+
+wifi_ip_status reports the IPv4 address and default route using BusyBox-
+compatible ip addr show and ip route syntax (not ip -br). The Internet
+test contacts 1.1.1.1 using two ICMP pings and looks up example.com via
+the configured DNS resolver. Both checks are run only on explicit request,
+never during the per-SSID preview. A failed ICMP probe cannot conclusively
+prove Internet connectivity is absent.
+
+To request a DHCP renewal from an existing BusyBox udhcpc process:
+
+    wifi_dhcp_renew --confirm
+    wifi_ip_status
+
+This sends USR1 to one verified matching udhcpc process and may request
+doas authorization. It refuses missing or ambiguous clients and never
+starts a second DHCP process, flushes addresses, or restarts networking.
+For dhcpcd or custom managers use their existing configuration instead.
+
+For automatic DHCP handling after a Wi-Fi association changes, Alpine
+documents the wpa_cli action service and the bundled action script at
+/etc/wpa_supplicant/wpa_cli.sh. Inspect before enabling it:
+
+    ps | grep '[w]pa_cli'
+    rc-service wpa_cli status
+    ls -l /etc/wpa_supplicant/wpa_cli.sh
+    cat /etc/conf.d/wpa_cli
+
+Alpine guidance: https://wiki.alpinelinux.org/wiki/Wi-Fi
+
+## Enable persistent saved networks (explicit administrator action)
+
+A running wpa_supplicant without update_config=1 normally refuses
+save_config. The opt-in script NEVER reloads or restarts the daemon.
+
+Inspect the exact -c configuration path of your running daemon:
+
+    ps | grep '[w]pa_supplicant'
+
+Then inspect the usual root-owned file WITHOUT printing passwords:
+
+    doas sh ~/.config/sh/scripts/enable-wpa-saving.sh --check
+
+Once a fallback saved connection is available, deliberately allow saving:
+
+    doas sh ~/.config/sh/scripts/enable-wpa-saving.sh --enable --confirm
+
+The script refuses symlinks, non-root ownership, duplicated directives,
+and inaccessible configs. It creates a 0600 backup and 0600 replacement
+in the same directory without echoing secrets; it never restarts Wi-Fi.
+
+Enabling the file does not change the currently running daemon.
+When ready for a possible interruption/loss of temporary profiles:
+
+    wpa_cli -i wlan0 reconfigure
+    wifi_status
+    wpa_cli -i wlan0 save_config
+
+The active profile may reconnect or change, and save_config may rewrite
+comments in the file; keep the private backup. Never loosen control
+socket permissions to make it work. After successful save_config, new
+profiles can use the existing "Join WPA2 and save" menu option.
+
+Test the new IP/DHCP logic with mocks (NO real network changes):
+
+    sh tests/wifi-net.sh
+
+This PR is stacked on the join-new Wi-Fi feature branch. Merge in order.
