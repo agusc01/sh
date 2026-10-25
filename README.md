@@ -247,3 +247,33 @@ Test the new IP/DHCP logic with mocks (NO real network changes):
     sh tests/wifi-net.sh
 
 This PR is stacked on the join-new Wi-Fi feature branch. Merge in order.
+
+### Confirmed Alpine notebook: start existing wpa_cli action service
+
+Notebook verification showed:
+- `wpa_cli -i wlan0 reconfigure` and `save_config` both return OK.
+- `/etc/conf.d/wpa_cli` already sets WPACLI_OPTS to the packaged
+  `/etc/wpa_supplicant/wpa_cli.sh` action script.
+- BusyBox `udhcpc` is running with `-i wlan0` and a matching PID file;
+  the action script references that PID file and signals its client.
+- `rc-service wpa_cli status` was stopped and `sh tests/wifi-net.sh` passed.
+
+Therefore, prefer the packaged OpenRC action service instead of inventing
+a second background DHCP monitor:
+
+    doas rc-service wpa_cli start
+    rc-service wpa_cli status
+    ps | grep '[w]pa_cli'
+
+The service may request a DHCP renewal on association events. Run the
+commands locally since connectivity could briefly change. Once tested:
+
+    doas rc-update add wpa_cli default
+
+Test a deliberate Wi-Fi switch, then verify `wifi_status`, `wifi_ip_status`,
+`ip route`, and `wifi_internet_status`. The IP address and gateway must
+correspond to the current access point; `wpa_state=COMPLETED` by itself
+does not prove DHCP or Internet connectivity.
+
+Do not run `wifi_dhcp_renew --confirm` on every switch when this event
+service is already handling DHCP: it is a manual recovery command only.
