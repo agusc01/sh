@@ -122,3 +122,10 @@ routes. A wrong password may leave the notebook without Wi-Fi until you
 reselect the previous saved profile.
 
 This is not yet a general enterprise or WPA3 configuration system.
+
+For a nonsecret eligibility check, run `wifi_join_supported 'SSID'` (or
+`wifi join-supported 'SSID'`). It returns success only if cached scans
+confirm WPA2-Personal without WPA3/SAE/EAP/WEP ambiguity. If it fails,
+request `wifi_scan`, then inspect `wifi_info 'SSID'` before attempting
+enrollment. The graphical and terminal menus use this same check to avoid
+prompting for passwords on unsupported networks.
