@@ -176,6 +176,34 @@ if sh "$root/bin/wifi" join-supported 'Not in scan' >/dev/null 2>&1; then
     exit 1
 fi
 
+# Joining a new network must preserve prior enabled profiles, too.
+MOCK_EXTRA_ENABLED=1; export MOCK_EXTRA_ENABLED
+MOCK_EXTRA_DISABLED=1; export MOCK_EXTRA_DISABLED
+: > "$MOCK_ACTION_LOG"
+printf 'samplepass123\n' | sh "$root/bin/wifi" join-new 'New Network' |
+    grep -F 'WPA2 connection requested' >/dev/null
+grep -Fx 'select_network:3' "$MOCK_ACTION_LOG" >/dev/null
+grep -Fx 'enable_network:8:no-connect' "$MOCK_ACTION_LOG" >/dev/null
+if grep -Fx 'enable_network:9:no-connect' "$MOCK_ACTION_LOG" >/dev/null; then
+    echo 'Error: New connection woke a disabled profile.' >&2; exit 1
+fi
+unset MOCK_EXTRA_ENABLED MOCK_EXTRA_DISABLED
+: > "$MOCK_ACTION_LOG"
+
+# Unsupported/no-connect failures must not fall back to plain enable_network
+# or incorrectly report that the old profile was restored.
+MOCK_EXTRA_ENABLED=1; export MOCK_EXTRA_ENABLED
+MOCK_ACTION_FAIL=enable_network; export MOCK_ACTION_FAIL
+: > "$MOCK_ACTION_LOG"
+if sh "$root/bin/wifi" connect-saved 'Home:5G' >/dev/null 2>&1; then
+    echo 'Error: Failed profile restoration reported success.' >&2; exit 1
+fi
+if grep -Fx 'enable_network:8:' "$MOCK_ACTION_LOG" >/dev/null; then
+    echo 'Error: Unsafe plain enable_network fallback was attempted.' >&2; exit 1
+fi
+unset MOCK_EXTRA_ENABLED MOCK_ACTION_FAIL
+: > "$MOCK_ACTION_LOG"
+
 # WPA2 profile enrollment consumes the password from stdin, not argv.
 # All secrets here are harmless fixed fixtures used only in mocked tests.
 : > "$MOCK_ACTION_LOG"
