@@ -52,7 +52,10 @@ case "$3" in
         # Simulate interactive wpa_cli, without saving the password anywhere.
         IFS= read -r line || exit 1
         case "$line" in
-            'set_network 3 psk "'*'"') echo 'password via stdin:3' >> "$MOCK_ACTION_LOG"; echo OK ;;
+            'set_network 3 psk "'*'"')
+                echo 'password via stdin:3' >> "$MOCK_ACTION_LOG"
+                if [ "${MOCK_PSK_FAIL:-0}" = 1 ]; then echo FAIL; else echo OK; fi
+                ;;
             *) echo FAIL ;;
         esac
         ;;
@@ -183,6 +186,18 @@ fi
 if printf 'samplepass123\n' | sh "$root/bin/wifi" join-new 'Guest Lounge' >/dev/null 2>&1; then
     echo 'Error: Open SSID incorrectly accepted as WPA2.' >&2; exit 1
 fi
+# Reject daemon credential failures and remove a partially created profile.
+: > "$MOCK_ACTION_LOG"
+MOCK_PSK_FAIL=1; export MOCK_PSK_FAIL
+if printf 'ninechars\n' | sh "$root/bin/wifi" join-new '7' >/dev/null 2>&1; then
+    echo 'Error: Rejected password command reported as success.' >&2; exit 1
+fi
+grep -Fx 'remove_network:3' "$MOCK_ACTION_LOG" >/dev/null
+if grep -Fx 'save_config:' "$MOCK_ACTION_LOG" >/dev/null; then
+    echo 'Error: Rejected password command was saved.' >&2; exit 1
+fi
+unset MOCK_PSK_FAIL
+: > "$MOCK_ACTION_LOG"
 if printf 'samplepass123\n' | sh "$root/bin/wifi" join-new 'Home:5G' >/dev/null 2>&1; then
     echo 'Error: Saved SSID improperly re-enrolled.' >&2; exit 1
 fi
