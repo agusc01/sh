@@ -129,6 +129,17 @@ fi
 unset MOCK_SAVE_FAIL
 
 
+# Eligibility is read-only and uses the same security rules as wifi_join_new.
+sh "$root/bin/wifi" join-supported 'New Network'
+if sh "$root/bin/wifi" join-supported 'Guest Lounge' >/dev/null 2>&1; then
+    echo 'Error: Open SSID was marked joinable.' >&2
+    exit 1
+fi
+if sh "$root/bin/wifi" join-supported 'Not in scan' >/dev/null 2>&1; then
+    echo 'Error: Stale or unknown SSID was marked joinable.' >&2
+    exit 1
+fi
+
 # WPA2 profile enrollment consumes the password from stdin, not argv.
 # All secrets here are harmless fixed fixtures used only in mocked tests.
 : > "$MOCK_ACTION_LOG"
