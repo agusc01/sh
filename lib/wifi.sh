@@ -295,8 +295,13 @@ wifi_join_supported() {
 # Create a new WPA2-Personal profile using a passphrase from standard input.
 # Never place the password or its derived PSK in argv or a temporary file.
 wifi_join_new() {
+    join_temporary=0
+    if [ "$#" -eq 2 ] && [ "$1" = --temporary ]; then
+        join_temporary=1
+        shift
+    fi
     [ "$#" -eq 1 ] && [ -n "$1" ] || {
-        echo 'Usage: wifi_join_new SSID < secure-password-input' >&2
+        echo 'Usage: wifi_join_new [--temporary] SSID < secure-password-input' >&2
         return 2
     }
     join_ssid=$1
@@ -397,16 +402,30 @@ wifi_join_new() {
     fi
     join_result=''
 
-    # Save BEFORE switching to avoid disrupting a working connection on a
-    # profile persistence failure. Roll back an incomplete new profile.
-    if ! wifi_wpa_expect_ok "$join_iface" save_config; then
-        "${WIFI_WPA_CLI:-wpa_cli}" -i "$join_iface" remove_network "$join_id" >/dev/null 2>&1 || :
-        echo 'Error: Profile not activated because it could not be saved.' >&2
-        return 1
+    if [ "$join_temporary" -eq 0 ]; then
+        # For explicitly persistent joins, save before switching. A failure
+        # MUST NOT alter the current association or become a temporary join.
+        if ! wifi_wpa_expect_ok "$join_iface" save_config; then
+            "${WIFI_WPA_CLI:-wpa_cli}" -i "$join_iface" remove_network "$join_id" >/dev/null 2>&1 || :
+            echo 'Error: Profile not activated because it could not be saved.' >&2
+            echo 'Try --temporary for an explicitly unsaved Wi-Fi connection.' >&2
+            return 1
+        fi
     fi
     if ! wifi_wpa_expect_ok "$join_iface" select_network "$join_id"; then
-        echo 'WARNING: Profile saved, but association could not be requested.' >&2
+        if [ "$join_temporary" -eq 1 ]; then
+            "${WIFI_WPA_CLI:-wpa_cli}" -i "$join_iface" remove_network "$join_id" >/dev/null 2>&1 || :
+            echo 'Error: Temporary Wi-Fi association was not requested.' >&2
+        else
+            echo 'WARNING: Profile saved, but association could not be requested.' >&2
+        fi
         return 1
+    fi
+    if [ "$join_temporary" -eq 1 ]; then
+        printf 'Temporary WPA2 connection requested for %s (NOT saved to disk).\n' "$join_ssid"
+        echo 'This session-only profile is held in wpa_supplicant memory; it may disappear when it restarts.'
+        echo 'Verify authentication, IP and DHCP separately using wifi_status and ip addr show.'
+        return 0
     fi
     # Persist the enabled selection, since add_network creates a disabled
     # profile and select_network changes its enabled state.
