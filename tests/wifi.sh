@@ -24,6 +24,7 @@ case "$3" in
         printf 'a1\t2412\t-69\t[WPA2-PSK-CCMP][ESS]\tHome:5G\n'
         printf 'b2\t5200\t-44\t[WPA2-PSK-CCMP][ESS]\tHome:5G\n'
         printf 'c3\t2462\t-78\t[ESS]\tGuest Lounge\n'
+        printf 'd4\t2437\t-55\t[WPA2-PSK-CCMP][ESS]\tNew Network\n'
         ;;
     list_networks)
         printf 'network id / ssid / bssid / flags\n0\tHome:5G\tany\t[CURRENT]\n'
@@ -31,6 +32,8 @@ case "$3" in
         :
         ;;
     scan) echo OK ;;
+    add_network) echo 3 ;;
+    set_network) printf '%s:%s:%s\n' "$3" "$4" "$5" >> "$MOCK_ACTION_LOG"; echo OK ;;
     select_network|disconnect|remove_network|save_config)
         printf '%s:%s\n' "$3" "${4:-}" >> "$MOCK_ACTION_LOG"
         if [ "$3" = save_config ] && [ "${MOCK_SAVE_FAIL:-0}" = 1 ]; then
@@ -41,13 +44,29 @@ case "$3" in
             echo OK
         fi
         ;;
+    '')
+        # Simulate interactive wpa_cli without ever writing the PSK to logs.
+        IFS= read -r line || exit 1
+        case "$line" in
+            'set_network 3 psk '*) echo 'psk via stdin:3' >> "$MOCK_ACTION_LOG"; echo OK ;;
+            *) echo FAIL ;;
+        esac
+        ;;
     *) exit 1 ;;
 esac
 MOCK
-chmod +x "$workspace/bin/iw" "$workspace/bin/wpa_cli"
+cat > "$workspace/bin/wpa_passphrase" <<'MOCK'
+#!/bin/sh
+[ "$1" = 'New Network' ] || exit 1
+IFS= read -r passphrase || exit 1
+[ "$passphrase" = 'samplepass123' ] || exit 1
+printf 'network={\n\t#psk=samplepass123\n\tpsk=%064d\n}\n' 0
+MOCK
+chmod +x "$workspace/bin/iw" "$workspace/bin/wpa_cli" "$workspace/bin/wpa_passphrase"
 SH_HOME=$root; export SH_HOME
 WIFI_IW="$workspace/bin/iw"; export WIFI_IW
 WIFI_WPA_CLI="$workspace/bin/wpa_cli"; export WIFI_WPA_CLI
+WIFI_WPA_PASSPHRASE="$workspace/bin/wpa_passphrase"; export WIFI_WPA_PASSPHRASE
 WIFI_INTERFACE=wlp2s0; export WIFI_INTERFACE
 MOCK_ACTION_LOG="$workspace/actions"; export MOCK_ACTION_LOG
 
@@ -108,6 +127,36 @@ if sh "$root/bin/wifi" forget-saved 'Home:5G' --confirm >/dev/null 2>&1; then
     echo 'Error: Failed profile persistence was reported as successful.' >&2; exit 1
 fi
 unset MOCK_SAVE_FAIL
+
+
+# WPA2 profile enrollment consumes the password from stdin, not argv.
+# All secrets here are harmless fixed fixtures used only in mocked tests.
+: > "$MOCK_ACTION_LOG"
+printf 'samplepass123\n' | sh "$root/bin/wifi" join-new 'New Network' |
+    grep -F 'WPA2 connection requested' >/dev/null
+grep -Fx 'set_network:3:ssid:4e6577204e6574776f726b' "$MOCK_ACTION_LOG" >/dev/null
+grep -Fx 'psk via stdin:3' "$MOCK_ACTION_LOG" >/dev/null
+grep -Fx 'save_config:' "$MOCK_ACTION_LOG" >/dev/null
+grep -Fx 'select_network:3' "$MOCK_ACTION_LOG" >/dev/null
+if grep -F 'samplepass123' "$MOCK_ACTION_LOG" >/dev/null; then
+    echo 'Error: Wi-Fi password appeared in the action log.' >&2; exit 1
+fi
+: > "$MOCK_ACTION_LOG"
+if printf 'badpass\n' | sh "$root/bin/wifi" join-new 'New Network' >/dev/null 2>&1; then
+    echo 'Error: Bad password input succeeded.' >&2; exit 1
+fi
+[ ! -s "$MOCK_ACTION_LOG" ] || {
+    echo 'Error: Invalid password modified a network.' >&2; exit 1
+}
+if printf 'samplepass123\n' | sh "$root/bin/wifi" join-new 'Guest Lounge' >/dev/null 2>&1; then
+    echo 'Error: Open SSID incorrectly accepted as WPA2.' >&2; exit 1
+fi
+if printf 'samplepass123\n' | sh "$root/bin/wifi" join-new 'Home:5G' >/dev/null 2>&1; then
+    echo 'Error: Saved SSID improperly re-enrolled.' >&2; exit 1
+fi
+[ ! -s "$MOCK_ACTION_LOG" ] || {
+    echo 'Error: Rejected join performed network writes.' >&2; exit 1
+}
 
 MOCK_WPA_DOWN=1; export MOCK_WPA_DOWN
 [ "$(sh "$root/bin/wifi" list)" = Home:5G ]
