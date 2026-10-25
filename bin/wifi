@@ -7,7 +7,7 @@ SH_HOME=${SH_HOME:-"$HOME/.config/sh"}
 operation=${0##*/}
 if [ "$operation" = wifi ]; then
     [ "$#" -gt 0 ] || {
-        echo 'Usage: wifi {status|list|info SSID|saved|scan|connect-saved SSID|disconnect --confirm|forget-saved SSID --confirm|join-new SSID|join-supported SSID|ip-status|internet-status|dhcp-renew --confirm}' >&2
+        echo 'Usage: wifi {status|list|info SSID|saved|scan|connect-saved SSID|enable-saved SSID --confirm|disconnect --confirm|forget-saved SSID --confirm|join-new SSID|join-supported SSID|ip-status|internet-status|dhcp-renew --confirm}' >&2
         exit 2
     }
     operation=$1
@@ -20,6 +20,7 @@ case "$operation" in
     saved|wifi_saved) wifi_saved "$@" ;;
     scan|wifi_scan) wifi_scan "$@" ;;
     connect-saved|wifi_connect_saved) wifi_connect_saved "$@" ;;
+    enable-saved|wifi_enable_saved) wifi_enable_saved "$@" ;;
     disconnect|wifi_disconnect) wifi_disconnect "$@" ;;
     forget-saved|wifi_forget_saved) wifi_forget_saved "$@" ;;
     join-new|wifi_join_new) wifi_join_new "$@" ;;
@@ -27,5 +28,5 @@ case "$operation" in
     ip-status|wifi_ip_status) wifi_ip_status "$@" ;;
     internet-status|wifi_internet_status) wifi_internet_status "$@" ;;
     dhcp-renew|wifi_dhcp_renew) wifi_dhcp_renew "$@" ;;
-    *) echo 'Usage: wifi {status|list|info SSID|saved|scan|connect-saved SSID|disconnect --confirm|forget-saved SSID --confirm|join-new SSID|join-supported SSID|ip-status|internet-status|dhcp-renew --confirm}' >&2; exit 2 ;;
+    *) echo 'Usage: wifi {status|list|info SSID|saved|scan|connect-saved SSID|enable-saved SSID --confirm|disconnect --confirm|forget-saved SSID --confirm|join-new SSID|join-supported SSID|ip-status|internet-status|dhcp-renew --confirm}' >&2; exit 2 ;;
 esac
