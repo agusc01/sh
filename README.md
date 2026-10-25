@@ -142,3 +142,29 @@ SAE is permitted *only when the same entry also advertises WPA2-PSK*
 request `wifi_scan`, then inspect `wifi_info 'SSID'` before attempting
 enrollment. The graphical and terminal menus use this same check to avoid
 prompting for passwords on unsupported networks.
+
+### Temporary WPA2 connection without persistent configuration
+
+When `wpa_cli save_config` returns `FAIL`, the current daemon may not have
+`update_config=1` enabled, or cannot write its actual configuration file.
+Do not silently turn on persistent writes or loosen the control socket permissions.
+
+`wifi_join_new --temporary 'SSID'` uses the same masked-stdin password flow
+but intentionally skips both `save_config` calls. It adds an in-memory network
+profile and requests `select_network`; the profile may disappear after restarting
+`wpa_supplicant`. It may interrupt the current Wi-Fi connection and does not
+guarantee DHCP/IP assignment. This is an explicit alternative, not an automatic
+fallback from a failed persistent join. The normal `wifi_join_new 'SSID'`
+continues to abort before switching if its first `save_config` fails.
+
+To inspect the usual Alpine configuration without printing passwords:
+
+```sh
+ps | grep '[w]pa_supplicant'
+doas grep -nE '^[[:space:]]*update_config[[:space:]]*=' /etc/wpa_supplicant/wpa_supplicant.conf
+```
+
+Check the actual `-c` path in the running process before assuming the above
+file is in use. A missing or zero `update_config` disables persistence.
+Editing the active root-managed file and restarting the daemon should be a
+separate deliberate admin task, since restarting drops the current association.
