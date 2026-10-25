@@ -186,6 +186,37 @@ wifi_wpa_expect_ok() {
     }
 }
 
+# Return IDs of profiles that are currently enabled (including CURRENT).
+# Snapshot this before select_network disables all other network profiles.
+wifi_wpa_enabled_ids() {
+    [ "$#" -eq 1 ] || return 2
+    enabled_rows=$("${WIFI_WPA_CLI:-wpa_cli}" -i "$1" list_networks 2>/dev/null) || {
+        echo 'Error: Could not inspect enabled Wi-Fi profiles.' >&2
+        return 1
+    }
+    printf '%s\n' "$enabled_rows" | awk -F '\t' '
+        NR > 1 && $1 ~ /^[0-9]+$/ &&
+        $4 !~ /\[(DISABLED|TEMP-DISABLED)\]/ { print $1 }'
+}
+
+# Restore only profiles enabled before selecting a new network, without
+# triggering an immediate second connection or changing intentionally
+# disabled profiles. Never fall back to plain enable_network.
+wifi_wpa_restore_enabled() {
+    [ "$#" -eq 3 ] || return 2
+    restore_iface=$1
+    restore_selected=$2
+    restore_ids=$3
+    for restore_id in $restore_ids; do
+        [ "$restore_id" = "$restore_selected" ] && continue
+        if ! wifi_wpa_expect_ok "$restore_iface" enable_network "$restore_id" no-connect; then
+            echo 'WARNING: Could not restore previously enabled profiles.' >&2
+            echo 'Current selection may work, but automatic reconnection is limited.' >&2
+            return 1
+        fi
+    done
+}
+
 # Resolve a saved SSID to exactly one network ID. Refuse ambiguous profiles,
 # missing profiles, and unexpected replies rather than guessing a network ID.
 wifi_saved_id() {
@@ -233,9 +264,34 @@ wifi_connect_saved() {
     }
     connect_id=$(wifi_saved_id "$1") || return 1
     connect_iface=$(wifi_wpa_interface) || return 1
-    # select_network intentionally disables other profiles in wpa_supplicant.
+    connect_enabled=$(wifi_wpa_enabled_ids "$connect_iface") || return 1
+    # Select the requested SSID, then restore the previously enabled
+    # profiles without triggering a second roaming decision.
     wifi_wpa_expect_ok "$connect_iface" select_network "$connect_id" || return 1
-    printf 'Connection requested for %s. Check wifi_status; DHCP/IP is managed separately.\n' "$1"
+    wifi_wpa_restore_enabled "$connect_iface" "$connect_id" "$connect_enabled" || return 1
+    if ! wifi_wpa_expect_ok "$connect_iface" save_config; then
+        echo 'WARNING: Connection requested, but enabled profiles were not saved.' >&2
+        return 1
+    fi
+    printf 'Connection requested for %s; previously enabled profiles preserved.\n' "$1"
+    echo 'Check wifi_status; DHCP/IP is managed separately.'
+}
+
+# Enable a previously disabled saved profile for automatic reconnection,
+# without interrupting the currently associated Wi-Fi.
+wifi_enable_saved() {
+    [ "$#" -eq 2 ] && [ -n "$1" ] && [ "$2" = --confirm ] || {
+        echo 'Usage: wifi_enable_saved SSID --confirm' >&2
+        return 2
+    }
+    enable_id=$(wifi_saved_id "$1") || return 1
+    enable_iface=$(wifi_wpa_interface) || return 1
+    wifi_wpa_expect_ok "$enable_iface" enable_network "$enable_id" no-connect || return 1
+    if ! wifi_wpa_expect_ok "$enable_iface" save_config; then
+        echo 'WARNING: Profile enabled in memory but not saved to disk.' >&2
+        return 1
+    fi
+    printf 'Auto-reconnect enabled for %s without switching the current Wi-Fi.\n' "$1"
 }
 
 wifi_disconnect() {
@@ -366,6 +422,7 @@ wifi_join_new() {
     [ "${#join_hex}" -eq "$((join_bytes * 2))" ] || {
         echo 'Error: Could not encode SSID.' >&2; return 1
     }
+    join_enabled=$(wifi_wpa_enabled_ids "$join_iface") || return 1
     join_id=$("${WIFI_WPA_CLI:-wpa_cli}" -i "$join_iface" add_network 2>/dev/null) || {
         echo 'Error: Could not add a network profile.' >&2; return 1
     }
@@ -421,6 +478,9 @@ wifi_join_new() {
         fi
         return 1
     fi
+    # Restore profiles which were enabled before the manual connection.
+    # Intentionally disabled profiles require a separate explicit action.
+    wifi_wpa_restore_enabled "$join_iface" "$join_id" "$join_enabled" || return 1
     if [ "$join_temporary" -eq 1 ]; then
         printf 'Temporary WPA2 connection requested for %s (NOT saved to disk).\n' "$join_ssid"
         echo 'This session-only profile is held in wpa_supplicant memory; it may disappear when it restarts.'
