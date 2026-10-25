@@ -278,13 +278,16 @@ wifi_join_supported() {
     printf '%s\n' "$support_scans" | awk -F '\t' '
         NF >= 4 && $1 == ENVIRON["WIFI_LOOKUP_SSID"] {
             found=1
+            # WPA2/WPA3 transition mode reports WPA2-PSK+SAE-CCMP.
+            # SAE does not make the WPA2-PSK path unavailable. Still reject
+            # WPA3-only, EAP, WEP, open, or inconsistent BSS configurations.
             if (index($3, "WPA2-PSK") == 0 ||
-                $3 ~ /(WPA3|SAE|EAP|WEP)/)
+                $3 ~ /(EAP|WEP|OWE)/)
                 unsupported=1
         }
         END { exit !found || unsupported }' || {
-        printf 'Error: WPA2-Personal not confirmed for SSID %s in cached scans.\n' "$1" >&2
-        echo 'Unsupported, ambiguous or stale network security. Run wifi_scan and retry.' >&2
+        printf 'Error: No compatible WPA2-PSK access point confirmed for SSID %s.\n' "$1" >&2
+        echo 'Check cached security flags with wifi_info; run wifi_scan and retry if stale.' >&2
         return 1
     }
 }
@@ -355,6 +358,12 @@ wifi_join_new() {
             echo 'Error: Unexpected new network ID.' >&2; return 1 ;;
     esac
     if ! wifi_wpa_expect_ok "$join_iface" set_network "$join_id" ssid "$join_hex"; then
+        "${WIFI_WPA_CLI:-wpa_cli}" -i "$join_iface" remove_network "$join_id" >/dev/null 2>&1 || :
+        return 1
+    fi
+    # Prefer WPA2-Personal explicitly when joining a WPA2/WPA3 transition AP.
+    # Do not silently select SAE without negotiating its separate requirements.
+    if ! wifi_wpa_expect_ok "$join_iface" set_network "$join_id" key_mgmt WPA-PSK; then
         "${WIFI_WPA_CLI:-wpa_cli}" -i "$join_iface" remove_network "$join_id" >/dev/null 2>&1 || :
         return 1
     fi
