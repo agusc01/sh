@@ -25,6 +25,10 @@ case "$3" in
         printf 'b2\t5200\t-44\t[WPA2-PSK-CCMP][ESS]\tHome:5G\n'
         printf 'c3\t2462\t-78\t[ESS]\tGuest Lounge\n'
         printf 'd4\t2437\t-55\t[WPA2-PSK-CCMP][ESS]\tNew Network\n'
+        # WPA2/WPA3 transition hotspot seen in real Alpine notebook testing.
+        printf 'e5\t2412\t-35\t[WPA2-PSK+SAE-CCMP][ESS]\t7\n'
+        printf 'f6\t2412\t-60\t[WPA3-SAE-CCMP][ESS]\tWPA3 Only\n'
+        printf 'g7\t2412\t-45\t[WPA2-EAP-CCMP][ESS]\tCorporate\n'
         ;;
     list_networks)
         printf 'network id / ssid / bssid / flags\n0\tHome:5G\tany\t[CURRENT]\n'
@@ -57,7 +61,10 @@ esac
 MOCK
 cat > "$workspace/bin/wpa_passphrase" <<'MOCK'
 #!/bin/sh
-[ "$1" = 'New Network' ] || exit 1
+case "$1" in
+    'New Network'|7) ;;
+    *) exit 1 ;;
+esac
 IFS= read -r passphrase || exit 1
 [ "$passphrase" = 'samplepass123' ] || exit 1
 printf 'network={\n\t#psk=samplepass123\n\tpsk=%064d\n}\n' 0
@@ -70,7 +77,7 @@ WIFI_WPA_PASSPHRASE="$workspace/bin/wpa_passphrase"; export WIFI_WPA_PASSPHRASE
 WIFI_INTERFACE=wlp2s0; export WIFI_INTERFACE
 MOCK_ACTION_LOG="$workspace/actions"; export MOCK_ACTION_LOG
 
-[ "$(sh "$root/bin/wifi" list)" = "$(printf 'Home:5G\nGuest Lounge\nNew Network')" ]
+[ "$(sh "$root/bin/wifi" list)" = "$(printf 'Home:5G\nGuest Lounge\nNew Network\n7\nWPA3 Only\nCorporate')" ]
 [ "$(sh "$root/bin/wifi" saved)" = Home:5G ]
 sh "$root/bin/wifi" status | grep -F 'State: connected' >/dev/null
 sh "$root/bin/wifi" info 'Home:5G' | grep -F 'Signal: -44 dBm' >/dev/null
@@ -131,8 +138,17 @@ unset MOCK_SAVE_FAIL
 
 # Eligibility is read-only and uses the same security rules as wifi_join_new.
 sh "$root/bin/wifi" join-supported 'New Network'
+sh "$root/bin/wifi" join-supported '7' # WPA2/WPA3 transition, WPA2-PSK available
 if sh "$root/bin/wifi" join-supported 'Guest Lounge' >/dev/null 2>&1; then
     echo 'Error: Open SSID was marked joinable.' >&2
+    exit 1
+fi
+if sh "$root/bin/wifi" join-supported 'WPA3 Only' >/dev/null 2>&1; then
+    echo 'Error: WPA3-only SSID was marked WPA2 joinable.' >&2
+    exit 1
+fi
+if sh "$root/bin/wifi" join-supported 'Corporate' >/dev/null 2>&1; then
+    echo 'Error: Enterprise SSID was marked WPA2 joinable.' >&2
     exit 1
 fi
 if sh "$root/bin/wifi" join-supported 'Not in scan' >/dev/null 2>&1; then
@@ -146,12 +162,20 @@ fi
 printf 'samplepass123\n' | sh "$root/bin/wifi" join-new 'New Network' |
     grep -F 'WPA2 connection requested' >/dev/null
 grep -Fx 'set_network:3:ssid:4e6577204e6574776f726b' "$MOCK_ACTION_LOG" >/dev/null
+# Force the WPA2 profile type rather than accidentally choosing SAE.
+grep -Fx 'set_network:3:key_mgmt:WPA-PSK' "$MOCK_ACTION_LOG" >/dev/null
 grep -Fx 'psk via stdin:3' "$MOCK_ACTION_LOG" >/dev/null
 grep -Fx 'save_config:' "$MOCK_ACTION_LOG" >/dev/null
 grep -Fx 'select_network:3' "$MOCK_ACTION_LOG" >/dev/null
 if grep -F 'samplepass123' "$MOCK_ACTION_LOG" >/dev/null; then
     echo 'Error: Wi-Fi password appeared in the action log.' >&2; exit 1
 fi
+sh "$root/bin/wifi" join-supported '7'
+: > "$MOCK_ACTION_LOG"
+printf 'samplepass123\n' | sh "$root/bin/wifi" join-new '7' |
+    grep -F 'WPA2 connection requested' >/dev/null
+grep -Fx 'set_network:3:ssid:37' "$MOCK_ACTION_LOG" >/dev/null
+grep -Fx 'set_network:3:key_mgmt:WPA-PSK' "$MOCK_ACTION_LOG" >/dev/null
 : > "$MOCK_ACTION_LOG"
 if printf 'badpass\n' | sh "$root/bin/wifi" join-new 'New Network' >/dev/null 2>&1; then
     echo 'Error: Bad password input succeeded.' >&2; exit 1
