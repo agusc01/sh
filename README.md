@@ -311,3 +311,54 @@ continue to be handled by the existing wpa_cli event service.
 After saving, verify the configuration file remains root:root mode 600:
 
     stat -c '%a %U:%G %n' /etc/wpa_supplicant/wpa_supplicant.conf
+
+## Security hardening: keep saved Wi-Fi credentials private
+
+On the Alpine notebook, wpa_cli save_config succeeded but replaced a
+root:root 0600 configuration with a **root:root 0644** file. Some affected
+wpa_supplicant versions create a new temporary file under the daemon's
+default umask (typically 0022) and rename it over the original file.
+Changing the mode only AFTER saving leaves a disclosure window.
+Upstream fixes address the original permissions and private file creation;
+prefer upgrading the packaged wpa_supplicant when available.
+
+Immediate mitigation (DO NOT print the configuration contents):
+
+    doas chmod 600 /etc/wpa_supplicant/wpa_supplicant.conf
+    stat -c '%a %U:%G %n' /etc/wpa_supplicant/wpa_supplicant.conf
+
+For older versions, configure the existing OpenRC wpa_supplicant service
+to use a private umask. In /etc/conf.d/wpa_supplicant, add once:
+
+    umask="077"
+
+Preserve the other service options. OpenRC supports its umask variable
+in its default service starter. It must apply to the daemon, not merely
+the interactive shell or the wpa_cli process.
+
+This file change DOES NOT update a currently running daemon. When it is
+safe for Wi-Fi to disconnect briefly, restart the existing service:
+
+    doas rc-service wpa_supplicant restart
+
+Then verify the real daemon's process umask and that save_config keeps
+file permissions private:
+
+    for p in $(pidof wpa_supplicant); do grep '^Umask:' "/proc/$p/status"; done
+    wpa_cli -i wlan0 save_config
+    stat -c '%a %U:%G %n' /etc/wpa_supplicant/wpa_supplicant.conf
+
+Expect Umask: 0077, OK, and 600 root:root. A service restart can interrupt
+Wi-Fi and discard temporary profiles. If the checks fail, stop persisting
+profiles until the installed OpenRC script and package can be inspected.
+
+Defense in depth: the sh backend now refuses its own save_config calls
+unless the configuration is 0600, a unique live wpa_supplicant process
+matches the interface and config path, and its process umask has group
+and other bits completely masked (..77). Unknown conditions fail closed.
+Direct wpa_cli save_config commands BYPASS this guard. The guard is not
+a substitute for updating or hardening the actual daemon.
+
+Upstream references:
+https://www.spinics.net/lists/hostap/msg14143.html
+https://git.w1.fi/cgit/hostap/commit/?id=1037cc3678ef316ec65059897a941ac3bcfb44bb
