@@ -265,6 +265,30 @@ wifi_forget_saved() {
 }
 
 
+# Check whether a visible SSID can safely use the WPA2-Personal enrollment
+# path. Conservative for duplicate BSS entries: reject mixed security.
+wifi_join_supported() {
+    [ "$#" -eq 1 ] && [ -n "$1" ] || {
+        echo 'Usage: wifi_join_supported SSID' >&2
+        return 2
+    }
+    WIFI_LOOKUP_SSID=$1
+    export WIFI_LOOKUP_SSID
+    support_scans=$(wifi_scan_data) || return 1
+    printf '%s\n' "$support_scans" | awk -F '\t' '
+        NF >= 4 && $1 == ENVIRON["WIFI_LOOKUP_SSID"] {
+            found=1
+            if (index($3, "WPA2-PSK") == 0 ||
+                $3 ~ /(WPA3|SAE|EAP|WEP)/)
+                unsupported=1
+        }
+        END { exit !found || unsupported }' || {
+        printf 'Error: WPA2-Personal not confirmed for SSID %s in cached scans.\n' "$1" >&2
+        echo 'Unsupported, ambiguous or stale network security. Run wifi_scan and retry.' >&2
+        return 1
+    }
+}
+
 # Create a new WPA2-Personal profile using a passphrase from standard input.
 # Never place the password or its derived PSK in argv or a temporary file.
 wifi_join_new() {
@@ -292,19 +316,9 @@ wifi_join_new() {
         echo 'Error: wpa_passphrase is missing.' >&2; return 1
     }
 
-    # Do not downgrade a protected SSID or misconfigure WPA3-only networks.
+    # Use the same security policy as the graphical/terminal menus.
+    wifi_join_supported "$join_ssid" || return 1
     WIFI_LOOKUP_SSID=$join_ssid; export WIFI_LOOKUP_SSID
-    join_scans=$(wifi_scan_data) || return 1
-    printf '%s\n' "$join_scans" | awk -F '\t' '
-        $1 == ENVIRON["WIFI_LOOKUP_SSID"] {
-            found=1
-            if (index($3, "WPA2-PSK") == 0 || $3 ~ /(WPA3|SAE|EAP|WEP)/) unsupported=1
-        }
-        END { exit !found || unsupported }' || {
-        echo 'Error: WPA2-Personal not confirmed in cached scans for this SSID.' >&2
-        echo 'Open, WPA3-only, Enterprise, WEP and mixed-security SSIDs are unsupported.' >&2
-        return 1
-    }
 
     join_saved=$("${WIFI_WPA_CLI:-wpa_cli}" -i "$join_iface" list_networks 2>/dev/null) || {
         echo 'Error: Could not verify saved network names.' >&2; return 1
