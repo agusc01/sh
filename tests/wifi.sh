@@ -33,7 +33,7 @@ case "$3" in
         ;;
     scan) echo OK ;;
     add_network) echo 3 ;;
-    set_network) printf '%s:%s:%s\n' "$3" "$4" "$5" >> "$MOCK_ACTION_LOG"; echo OK ;;
+    set_network) printf '%s:%s:%s:%s\n' "$3" "$4" "$5" "$6" >> "$MOCK_ACTION_LOG"; echo OK ;;
     select_network|disconnect|remove_network|save_config)
         printf '%s:%s\n' "$3" "${4:-}" >> "$MOCK_ACTION_LOG"
         if [ "$3" = save_config ] && [ "${MOCK_SAVE_FAIL:-0}" = 1 ]; then
