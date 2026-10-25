@@ -49,31 +49,20 @@ case "$3" in
         fi
         ;;
     '')
-        # Simulate interactive wpa_cli without ever writing the PSK to logs.
+        # Simulate interactive wpa_cli, without saving the password anywhere.
         IFS= read -r line || exit 1
         case "$line" in
-            'set_network 3 psk '*) echo 'psk via stdin:3' >> "$MOCK_ACTION_LOG"; echo OK ;;
+            'set_network 3 psk "'*'"') echo 'password via stdin:3' >> "$MOCK_ACTION_LOG"; echo OK ;;
             *) echo FAIL ;;
         esac
         ;;
     *) exit 1 ;;
 esac
 MOCK
-cat > "$workspace/bin/wpa_passphrase" <<'MOCK'
-#!/bin/sh
-case "$1" in
-    'New Network'|7) ;;
-    *) exit 1 ;;
-esac
-IFS= read -r passphrase || exit 1
-[ "$passphrase" = 'samplepass123' ] || exit 1
-printf 'network={\n\t#psk=samplepass123\n\tpsk=%064d\n}\n' 0
-MOCK
-chmod +x "$workspace/bin/iw" "$workspace/bin/wpa_cli" "$workspace/bin/wpa_passphrase"
+chmod +x "$workspace/bin/iw" "$workspace/bin/wpa_cli"
 SH_HOME=$root; export SH_HOME
 WIFI_IW="$workspace/bin/iw"; export WIFI_IW
 WIFI_WPA_CLI="$workspace/bin/wpa_cli"; export WIFI_WPA_CLI
-WIFI_WPA_PASSPHRASE="$workspace/bin/wpa_passphrase"; export WIFI_WPA_PASSPHRASE
 WIFI_INTERFACE=wlp2s0; export WIFI_INTERFACE
 MOCK_ACTION_LOG="$workspace/actions"; export MOCK_ACTION_LOG
 
@@ -164,19 +153,27 @@ printf 'samplepass123\n' | sh "$root/bin/wifi" join-new 'New Network' |
 grep -Fx 'set_network:3:ssid:4e6577204e6574776f726b' "$MOCK_ACTION_LOG" >/dev/null
 # Force the WPA2 profile type rather than accidentally choosing SAE.
 grep -Fx 'set_network:3:key_mgmt:WPA-PSK' "$MOCK_ACTION_LOG" >/dev/null
-grep -Fx 'psk via stdin:3' "$MOCK_ACTION_LOG" >/dev/null
+grep -Fx 'password via stdin:3' "$MOCK_ACTION_LOG" >/dev/null
 grep -Fx 'save_config:' "$MOCK_ACTION_LOG" >/dev/null
 grep -Fx 'select_network:3' "$MOCK_ACTION_LOG" >/dev/null
-if grep -F 'samplepass123' "$MOCK_ACTION_LOG" >/dev/null; then
+if grep -E 'samplepass123|ninechars' "$MOCK_ACTION_LOG" >/dev/null; then
     echo 'Error: Wi-Fi password appeared in the action log.' >&2; exit 1
 fi
 sh "$root/bin/wifi" join-supported '7'
 : > "$MOCK_ACTION_LOG"
-printf 'samplepass123\n' | sh "$root/bin/wifi" join-new '7' |
+# Exactly nine ASCII characters: regression for the original phone hotspot.
+printf 'ninechars\n' | sh "$root/bin/wifi" join-new '7' |
     grep -F 'WPA2 connection requested' >/dev/null
 grep -Fx 'set_network:3:ssid:37' "$MOCK_ACTION_LOG" >/dev/null
 grep -Fx 'set_network:3:key_mgmt:WPA-PSK' "$MOCK_ACTION_LOG" >/dev/null
 : > "$MOCK_ACTION_LOG"
+# Passwords that violate the length rule must be rejected before any writes.
+if printf 'short\n' | sh "$root/bin/wifi" join-new 'New Network' >/dev/null 2>&1; then
+    echo 'Error: Short password was accepted.' >&2; exit 1
+fi
+if printf 'abc"defgh\n' | sh "$root/bin/wifi" join-new 'New Network' >/dev/null 2>&1; then
+    echo 'Error: Unsafe unescaped password was accepted.' >&2; exit 1
+fi
 if printf 'badpass\n' | sh "$root/bin/wifi" join-new 'New Network' >/dev/null 2>&1; then
     echo 'Error: Bad password input succeeded.' >&2; exit 1
 fi
