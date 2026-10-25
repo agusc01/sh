@@ -67,6 +67,9 @@ wifi_udhcpc_pid() {
             END { exit !yes }'; then
             continue
         fi
+        case "${procpath##*/}" in
+            ''|*[!0-9]*) continue ;;
+        esac
         if [ -n "$matched" ]; then
             echo 'Error: Multiple matching udhcpc processes; refusing renewal.' >&2
             return 1
