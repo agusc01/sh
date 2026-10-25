@@ -263,3 +263,111 @@ wifi_forget_saved() {
     fi
     printf 'Forgot saved profile: %s\n' "$1"
 }
+
+
+# Create a new WPA2-Personal profile using a passphrase from standard input.
+# Never place the password or its derived PSK in argv or a temporary file.
+wifi_join_new() {
+    [ "$#" -eq 1 ] && [ -n "$1" ] || {
+        echo 'Usage: wifi_join_new SSID < secure-password-input' >&2
+        return 2
+    }
+    join_ssid=$1
+    [ ! -t 0 ] || {
+        echo 'Error: Use a masked password prompt, not an echoed terminal.' >&2
+        return 1
+    }
+    join_bytes=$(LC_ALL=C printf '%s' "$join_ssid" | wc -c | tr -d ' ')
+    [ "$join_bytes" -ge 1 ] && [ "$join_bytes" -le 32 ] || {
+        echo 'Error: SSID must be 1-32 bytes.' >&2
+        return 1
+    }
+    case "$join_ssid" in
+        *'
+'*|*'	'*) echo 'Error: Control characters in SSID are unsupported.' >&2; return 1 ;;
+    esac
+
+    join_iface=$(wifi_wpa_interface) || return 1
+    command -v "${WIFI_WPA_PASSPHRASE:-wpa_passphrase}" >/dev/null 2>&1 || {
+        echo 'Error: wpa_passphrase is missing.' >&2; return 1
+    }
+
+    # Do not downgrade a protected SSID or misconfigure WPA3-only networks.
+    WIFI_LOOKUP_SSID=$join_ssid; export WIFI_LOOKUP_SSID
+    join_scans=$(wifi_scan_data) || return 1
+    printf '%s\n' "$join_scans" | awk -F '\t' '
+        $1 == ENVIRON["WIFI_LOOKUP_SSID"] {
+            found=1
+            if (index($3, "WPA2-PSK") == 0) unsupported=1
+        }
+        END { exit !found || unsupported }' || {
+        echo 'Error: WPA2-Personal not confirmed in cached scans for this SSID.' >&2
+        echo 'Open, WPA3-only, Enterprise, WEP and mixed-security SSIDs are unsupported.' >&2
+        return 1
+    }
+
+    join_saved=$("${WIFI_WPA_CLI:-wpa_cli}" -i "$join_iface" list_networks 2>/dev/null) || {
+        echo 'Error: Could not verify saved network names.' >&2; return 1
+    }
+    if printf '%s\n' "$join_saved" | awk -F '\t' '
+        NR > 1 && $2 == ENVIRON["WIFI_LOOKUP_SSID"] { found=1 }
+        END { exit !found }'; then
+        echo 'Error: This SSID is already saved. Use wifi_connect_saved.' >&2
+        return 1
+    fi
+
+    # wpa_passphrase reads the secret from stdin. Discard its plaintext
+    # #psk comment; capture only the generated 64-character hexadecimal key.
+    join_psk=$("${WIFI_WPA_PASSPHRASE:-wpa_passphrase}" "$join_ssid" 2>/dev/null |
+        awk '$1 ~ /^psk=[[:xdigit:]]+$/ { sub(/^psk=/, "", $1); print $1; exit }')
+    [ "${#join_psk}" -eq 64 ] || {
+        echo 'Error: Invalid WPA2 password. Expected 8-63 characters.' >&2
+        return 1
+    }
+    case "$join_psk" in
+        *[!0123456789abcdefABCDEF]*)
+            echo 'Error: Invalid derived PSK.' >&2; return 1 ;;
+    esac
+
+    join_hex=$(LC_ALL=C printf '%s' "$join_ssid" | od -An -tx1 | tr -d ' \n')
+    [ "${#join_hex}" -eq "$((join_bytes * 2))" ] || {
+        echo 'Error: Could not encode SSID.' >&2; return 1
+    }
+    join_id=$("${WIFI_WPA_CLI:-wpa_cli}" -i "$join_iface" add_network 2>/dev/null) || {
+        echo 'Error: Could not add a network profile.' >&2; return 1
+    }
+    case "$join_id" in
+        ''|*[!0-9]*)
+            echo 'Error: Unexpected new network ID.' >&2; return 1 ;;
+    esac
+    if ! wifi_wpa_expect_ok "$join_iface" set_network "$join_id" ssid "$join_hex"; then
+        "${WIFI_WPA_CLI:-wpa_cli}" -i "$join_iface" remove_network "$join_id" >/dev/null 2>&1 || :
+        return 1
+    fi
+
+    # Send the credential-equivalent PSK over a pipe to interactive wpa_cli.
+    # Never send it in command-line args; don't print interactive output.
+    join_result=$(printf 'set_network %s psk %s\nquit\n' "$join_id" "$join_psk" |
+        "${WIFI_WPA_CLI:-wpa_cli}" -i "$join_iface" 2>/dev/null) || join_result=''
+    join_psk=''
+    if ! printf '%s\n' "$join_result" |
+        awk '/(^|[[:space:]>])OK[[:space:]]*$/ { found=1 } END { exit !found }'; then
+        "${WIFI_WPA_CLI:-wpa_cli}" -i "$join_iface" remove_network "$join_id" >/dev/null 2>&1 || :
+        echo 'Error: wpa_supplicant rejected the new credentials.' >&2
+        return 1
+    fi
+    join_result=''
+
+    # Save BEFORE switching to avoid disrupting a working connection on a
+    # profile persistence failure. Roll back an incomplete new profile.
+    if ! wifi_wpa_expect_ok "$join_iface" save_config; then
+        "${WIFI_WPA_CLI:-wpa_cli}" -i "$join_iface" remove_network "$join_id" >/dev/null 2>&1 || :
+        echo 'Error: Profile not activated because it could not be saved.' >&2
+        return 1
+    fi
+    if ! wifi_wpa_expect_ok "$join_iface" select_network "$join_id"; then
+        echo 'WARNING: Profile saved, but association could not be requested.' >&2
+        return 1
+    fi
+    printf 'WPA2 connection requested for %s. Verify status and DHCP/IP separately.\n' "$join_ssid"
+}
