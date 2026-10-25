@@ -91,3 +91,34 @@ Tests with mocked `iw` and `wpa_cli` (do not modify networking):
 ```sh
 sh tests/wifi.sh
 ```
+
+
+### Join a new WPA2-Personal network (preview milestone)
+
+`wifi_join_new SSID` expects a passphrase **on standard input**, never
+as a command-line argument. Supported networks must be visible in the
+current wpa_supplicant scan cache and explicitly advertise WPA2-PSK.
+Open, WPA3/SAE, mixed WPA2/WPA3, WEP and enterprise networks are rejected
+rather than silently reconfigured with inappropriate security.
+
+Use the **masked** `dmenu_wifi` prompt (suckless `-P`) or the no-echo
+`fzf_wifi` terminal prompt. Do not enter a Wi-Fi password in a normal
+terminal command, a command-line argument, a shell history entry, or an
+unmasked dmenu prompt. The backend rejects direct terminal stdin to prevent
+accidental echoing.
+
+The password flows over stdin to `wpa_passphrase`. Its generated credential
+is sent to wpa_cli's interactive standard input. Neither value is written
+to a temporary file or passed as an executable argument. The resulting
+saved `wpa_supplicant` profile **does** persist a credential-equivalent PSK
+in the existing root-managed configuration; keep that file restricted.
+
+Joining a new network can interrupt the current Wi-Fi link, because
+`select_network` disables the other network profiles while switching.
+Enrollment saves the new profile before requesting the switch, then saves
+the newly enabled state again. Status, authentication, DHCP and DNS must
+be verified separately; the script does not restart networking or configure
+routes. A wrong password may leave the notebook without Wi-Fi until you
+reselect the previous saved profile.
+
+This is not yet a general enterprise or WPA3 configuration system.
