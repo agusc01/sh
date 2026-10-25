@@ -98,8 +98,10 @@ sh tests/wifi.sh
 `wifi_join_new SSID` expects a passphrase **on standard input**, never
 as a command-line argument. Supported networks must be visible in the
 current wpa_supplicant scan cache and explicitly advertise WPA2-PSK.
-Open, WPA3/SAE, mixed WPA2/WPA3, WEP and enterprise networks are rejected
-rather than silently reconfigured with inappropriate security.
+Open, WPA3-only (SAE-only), WEP and enterprise networks are rejected.
+WPA2/WPA3 transition hotspots (for example `[WPA2-PSK+SAE-CCMP]`) are
+supported through their advertised WPA2-PSK method; we explicitly set
+`key_mgmt WPA-PSK` to avoid accidentally using the SAE method.
 
 Use the **masked** `dmenu_wifi` prompt (suckless `-P`) or the no-echo
 `fzf_wifi` terminal prompt. Do not enter a Wi-Fi password in a normal
@@ -125,7 +127,9 @@ This is not yet a general enterprise or WPA3 configuration system.
 
 For a nonsecret eligibility check, run `wifi_join_supported 'SSID'` (or
 `wifi join-supported 'SSID'`). It returns success only if cached scans
-confirm WPA2-Personal without WPA3/SAE/EAP/WEP ambiguity. If it fails,
+confirm WPA2-PSK capability without EAP, WEP or OWE ambiguity.
+SAE is permitted *only when the same entry also advertises WPA2-PSK*
+(as in a WPA2/WPA3 transition hotspot). If it fails,
 request `wifi_scan`, then inspect `wifi_info 'SSID'` before attempting
 enrollment. The graphical and terminal menus use this same check to avoid
 prompting for passwords on unsupported networks.
