@@ -109,11 +109,20 @@ terminal command, a command-line argument, a shell history entry, or an
 unmasked dmenu prompt. The backend rejects direct terminal stdin to prevent
 accidental echoing.
 
-The password flows over stdin to `wpa_passphrase`. Its generated credential
-is sent to wpa_cli's interactive standard input. Neither value is written
-to a temporary file or passed as an executable argument. The resulting
-saved `wpa_supplicant` profile **does** persist a credential-equivalent PSK
-in the existing root-managed configuration; keep that file restricted.
+The password flows over stdin to the backend, which sends a quoted
+passphrase directly to interactive `wpa_cli` via stdin (never as a
+command-line argument). This avoids a compatibility problem: some recent
+`wpa_passphrase` builds require a TTY on stdin and reject secure pipes.
+No temporary password files are used. The resulting `wpa_supplicant`
+configuration **can contain the original passphrase in plaintext**
+when `save_config` runs; keep that system file accessible only to root
+or other deliberately authorized administrators.
+
+In this first secure-input milestone passwords must be 8–63 printable
+ASCII bytes. Double quotes and backslashes are rejected until escaping
+can be audited and tested for the interactive `wpa_cli` parser. Error
+messages distinguish invalid password length from a rejected
+`wpa_supplicant` configuration command.
 
 Joining a new network can interrupt the current Wi-Fi link, because
 `select_network` disables the other network profiles while switching.
