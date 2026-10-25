@@ -25,6 +25,7 @@ mode=$(awk '
         n++
         v=$0
         sub(/^[^=]*=/, "", v)
+        sub(/^[[:space:]]*/, "", v)
         sub(/[[:space:]#].*$/, "", v)
         if (v == "1") state="enabled"
         else state="disabled"
