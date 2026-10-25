@@ -298,7 +298,7 @@ wifi_join_new() {
     printf '%s\n' "$join_scans" | awk -F '\t' '
         $1 == ENVIRON["WIFI_LOOKUP_SSID"] {
             found=1
-            if (index($3, "WPA2-PSK") == 0) unsupported=1
+            if (index($3, "WPA2-PSK") == 0 || $3 ~ /(WPA3|SAE|EAP|WEP)/) unsupported=1
         }
         END { exit !found || unsupported }' || {
         echo 'Error: WPA2-Personal not confirmed in cached scans for this SSID.' >&2
@@ -367,6 +367,12 @@ wifi_join_new() {
     fi
     if ! wifi_wpa_expect_ok "$join_iface" select_network "$join_id"; then
         echo 'WARNING: Profile saved, but association could not be requested.' >&2
+        return 1
+    fi
+    # Persist the enabled selection, since add_network creates a disabled
+    # profile and select_network changes its enabled state.
+    if ! wifi_wpa_expect_ok "$join_iface" save_config; then
+        echo 'WARNING: Association requested, but the enabled profile may not persist across reboot.' >&2
         return 1
     fi
     printf 'WPA2 connection requested for %s. Verify status and DHCP/IP separately.\n' "$join_ssid"
