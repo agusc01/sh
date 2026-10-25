@@ -315,9 +315,6 @@ wifi_join_new() {
     esac
 
     join_iface=$(wifi_wpa_interface) || return 1
-    command -v "${WIFI_WPA_PASSPHRASE:-wpa_passphrase}" >/dev/null 2>&1 || {
-        echo 'Error: wpa_passphrase is missing.' >&2; return 1
-    }
 
     # Use the same security policy as the graphical/terminal menus.
     wifi_join_supported "$join_ssid" || return 1
@@ -333,18 +330,32 @@ wifi_join_new() {
         return 1
     fi
 
-    # wpa_passphrase reads the secret from stdin. Discard its plaintext
-    # #psk comment; capture only the generated 64-character hexadecimal key.
-    join_psk=$("${WIFI_WPA_PASSPHRASE:-wpa_passphrase}" "$join_ssid" 2>/dev/null |
-        awk '$1 ~ /^psk=[[:xdigit:]]+$/ { sub(/^psk=/, "", $1); print $1; exit }')
-    [ "${#join_psk}" -eq 64 ] || {
-        echo 'Error: Invalid WPA2 password. Expected 8-63 characters.' >&2
+    # Read one password line from stdin. Never expose it via argv or echo it.
+    join_password=''
+    if ! IFS= read -r join_password; then
+        echo 'Error: No WPA2 password received on stdin.' >&2
         return 1
-    }
-    case "$join_psk" in
-        *[!0123456789abcdefABCDEF]*)
-            echo 'Error: Invalid derived PSK.' >&2; return 1 ;;
+    fi
+    join_password_len=$(LC_ALL=C printf '%s' "$join_password" | wc -c | tr -d ' ')
+    if [ "$join_password_len" -lt 8 ] || [ "$join_password_len" -gt 63 ]; then
+        join_password=''
+        echo 'Error: WPA2 password must contain 8-63 bytes.' >&2
+        return 1
+    fi
+    # Quote/backslash need a separate escaping implementation in interactive
+    # wpa_cli. Reject rather than altering user-entered credentials.
+    case "$join_password" in
+        *'"'*|*'\'*)
+            join_password=''
+            echo 'Error: Quotation marks and backslashes in passwords are not yet supported.' >&2
+            return 1
+            ;;
     esac
+    if LC_ALL=C printf '%s' "$join_password" | LC_ALL=C grep '[^ -~]' >/dev/null; then
+        join_password=''
+        echo 'Error: This initial WPA2 flow supports only printable ASCII passwords.' >&2
+        return 1
+    fi
 
     join_hex=$(LC_ALL=C printf '%s' "$join_ssid" | od -An -tx1 | tr -d ' \n')
     [ "${#join_hex}" -eq "$((join_bytes * 2))" ] || {
@@ -368,15 +379,20 @@ wifi_join_new() {
         return 1
     fi
 
-    # Send the credential-equivalent PSK over a pipe to interactive wpa_cli.
-    # Never send it in command-line args; don't print interactive output.
-    join_result=$(printf 'set_network %s psk %s\nquit\n' "$join_id" "$join_psk" |
+    # wpa_cli accepts a quoted ASCII passphrase through its interactive
+    # standard input. Do not put this secret in argv, log output, or files.
+    # wpa_supplicant derives the PSK internally and save_config persists
+    # the credential, so its config file MUST remain access-restricted.
+    join_result=$(printf 'set_network %s psk "%s"\nquit\n' "$join_id" "$join_password" |
         "${WIFI_WPA_CLI:-wpa_cli}" -i "$join_iface" 2>/dev/null) || join_result=''
-    join_psk=''
+    join_password=''
     if ! printf '%s\n' "$join_result" |
-        awk '/(^|[[:space:]>])OK[[:space:]]*$/ { found=1 } END { exit !found }'; then
+        awk '/(^|[[:space:]>])OK[[:space:]]*$/ { found=1 }
+             /(^|[[:space:]>])FAIL[[:space:]]*$/ { failed=1 }
+             END { exit !found || failed }'; then
+        join_result=''
         "${WIFI_WPA_CLI:-wpa_cli}" -i "$join_iface" remove_network "$join_id" >/dev/null 2>&1 || :
-        echo 'Error: wpa_supplicant rejected the new credentials.' >&2
+        echo 'Error: wpa_supplicant did not accept the new WPA2 passphrase.' >&2
         return 1
     fi
     join_result=''
