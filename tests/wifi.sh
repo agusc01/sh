@@ -170,6 +170,27 @@ printf 'ninechars\n' | sh "$root/bin/wifi" join-new '7' |
 grep -Fx 'set_network:3:ssid:37' "$MOCK_ACTION_LOG" >/dev/null
 grep -Fx 'set_network:3:key_mgmt:WPA-PSK' "$MOCK_ACTION_LOG" >/dev/null
 : > "$MOCK_ACTION_LOG"
+# With save_config disabled, persistent joining must abort and leave the
+# existing link alone; temporary joining must skip save_config entirely.
+MOCK_SAVE_FAIL=1; export MOCK_SAVE_FAIL
+: > "$MOCK_ACTION_LOG"
+if printf 'ninechars\n' | sh "$root/bin/wifi" join-new '7' >/dev/null 2>&1; then
+    echo 'Error: Persistent join ignored save_config failure.' >&2; exit 1
+fi
+grep -Fx 'remove_network:3' "$MOCK_ACTION_LOG" >/dev/null
+if grep -Fx 'select_network:3' "$MOCK_ACTION_LOG" >/dev/null; then
+    echo 'Error: Failed persistent save switched the network.' >&2; exit 1
+fi
+: > "$MOCK_ACTION_LOG"
+printf 'ninechars\n' | sh "$root/bin/wifi" join-new --temporary '7' |
+    grep -F 'NOT saved to disk' >/dev/null
+grep -Fx 'select_network:3' "$MOCK_ACTION_LOG" >/dev/null
+if grep -Fx 'save_config:' "$MOCK_ACTION_LOG" >/dev/null; then
+    echo 'Error: Temporary join tried to save a profile.' >&2; exit 1
+fi
+unset MOCK_SAVE_FAIL
+: > "$MOCK_ACTION_LOG"
+
 # Passwords that violate the length rule must be rejected before any writes.
 if printf 'short\n' | sh "$root/bin/wifi" join-new 'New Network' >/dev/null 2>&1; then
     echo 'Error: Short password was accepted.' >&2; exit 1
