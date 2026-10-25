@@ -171,11 +171,69 @@ wifi_wpa_interface() {
     printf '%s\n' "$write_iface"
 }
 
+# Older wpa_supplicant versions can create a world-readable .tmp file and
+# rename it over the original config on save. Checking chmod only AFTER
+# save_config is unsafe because credentials may already have been exposed.
+wifi_wpa_save_preflight() {
+    [ "$#" -eq 1 ] || return 2
+    save_iface=$1
+    save_conf=${WIFI_WPA_CONFIG:-/etc/wpa_supplicant/wpa_supplicant.conf}
+    save_proc_root=${WIFI_WPA_PROC_ROOT:-/proc}
+
+    if [ ! -f "$save_conf" ] || [ -L "$save_conf" ]; then
+        echo 'Error: Wi-Fi configuration must be a regular file, not a symlink.' >&2
+        return 1
+    fi
+    save_mode=$(stat -c '%a' "$save_conf" 2>/dev/null) || return 1
+    if [ "$save_mode" != 600 ]; then
+        echo 'Error: Refusing save_config: Wi-Fi configuration is not mode 600.' >&2
+        echo 'Restore root-only permissions before saving credentials.' >&2
+        return 1
+    fi
+
+    save_count=0
+    save_mask=''
+    for save_proc in "$save_proc_root"/[0-9]*; do
+        [ -r "$save_proc/cmdline" ] && [ -r "$save_proc/status" ] || continue
+        save_args=$(tr '\000' '\n' < "$save_proc/cmdline") || continue
+        save_command=$(printf '%s\n' "$save_args" | sed -n '1p')
+        [ "${save_command##*/}" = wpa_supplicant ] || continue
+        if ! printf '%s\n' "$save_args" |
+            awk -v dev="$save_iface" -v conf="$save_conf" '
+                $0 == "-i" { want_dev=1; next }
+                $0 == "-c" { want_conf=1; next }
+                want_dev { if ($0 == dev) has_dev=1; want_dev=0; next }
+                want_conf { if ($0 == conf) has_conf=1; want_conf=0; next }
+                index($0, "-i") == 1 && substr($0, 3) == dev { has_dev=1 }
+                index($0, "-c") == 1 && substr($0, 3) == conf { has_conf=1 }
+                END { exit !(has_dev && has_conf) }'; then
+            continue
+        fi
+        save_count=$((save_count + 1))
+        save_mask=$(awk '$1 == "Umask:" { print $2; exit }' "$save_proc/status")
+    done
+
+    if [ "$save_count" -ne 1 ]; then
+        echo 'Error: Could not uniquely identify the running wpa_supplicant daemon.' >&2
+        echo 'Refusing save_config until the active interface/configuration is verified.' >&2
+        return 1
+    fi
+    case "$save_mask" in
+        [0-7][0-7]77) return 0 ;;
+    esac
+    printf 'Error: Refusing save_config: daemon umask is %s, not root-only.\n' "${save_mask:-unknown}" >&2
+    echo 'Set umask="077" in /etc/conf.d/wpa_supplicant, then restart its service when safe.' >&2
+    return 1
+}
+
 wifi_wpa_expect_ok() {
     expect_iface=$1
     shift
     expect_command=$1
     shift
+    if [ "$expect_command" = save_config ]; then
+        wifi_wpa_save_preflight "$expect_iface" || return 1
+    fi
     expect_result=$("${WIFI_WPA_CLI:-wpa_cli}" -i "$expect_iface" "$expect_command" "$@" 2>/dev/null) || {
         printf 'Error: wpa_supplicant command %s failed.\n' "$expect_command" >&2
         return 1
