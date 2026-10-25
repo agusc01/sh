@@ -3,7 +3,15 @@ set -eu
 root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 workspace=$(mktemp -d)
 trap 'rm -R "$workspace"' 0
-mkdir -p "$workspace/bin"
+mkdir -p "$workspace/bin" "$workspace/wpa-proc/1000"
+# Fake a running wpa_supplicant daemon with safe root-only file creation.
+# No real Wi-Fi credentials or system services are touched.
+WIFI_WPA_CONFIG="$workspace/wpa_supplicant.conf"; export WIFI_WPA_CONFIG
+WIFI_WPA_PROC_ROOT="$workspace/wpa-proc"; export WIFI_WPA_PROC_ROOT
+: > "$WIFI_WPA_CONFIG"
+chmod 600 "$WIFI_WPA_CONFIG"
+printf '/sbin/wpa_supplicant\000-i\000wlp2s0\000-c\000%s\000' "$WIFI_WPA_CONFIG" > "$WIFI_WPA_PROC_ROOT/1000/cmdline"
+printf 'Name:\twpa_supplicant\nUmask:\t0077\n' > "$WIFI_WPA_PROC_ROOT/1000/status"
 cat > "$workspace/bin/iw" <<'MOCK'
 #!/bin/sh
 case "$1:$2:$3" in
@@ -293,6 +301,20 @@ if sh "$root/bin/wifi" connect-saved 'Home:5G' >/dev/null 2>&1; then
     echo 'Error: Connecting should require a working control socket.' >&2
     exit 1
 fi
+
+# A daemon started with umask 0022 can replace a 0600 config with a
+# 0644 temporary file. Refuse saving BEFORE sending save_config.
+printf 'Name:\twpa_supplicant\nUmask:\t0022\n' > "$WIFI_WPA_PROC_ROOT/1000/status"
+if sh -c '. "$SH_HOME/lib/wifi.sh"; wifi_wpa_save_preflight wlp2s0' >/dev/null 2>&1; then
+    echo 'Error: Unsafe wpa_supplicant umask was accepted.' >&2; exit 1
+fi
+printf 'Name:\twpa_supplicant\nUmask:\t0077\n' > "$WIFI_WPA_PROC_ROOT/1000/status"
+chmod 644 "$WIFI_WPA_CONFIG"
+if sh -c '. "$SH_HOME/lib/wifi.sh"; wifi_wpa_save_preflight wlp2s0' >/dev/null 2>&1; then
+    echo 'Error: World-readable Wi-Fi file was accepted.' >&2; exit 1
+fi
+chmod 600 "$WIFI_WPA_CONFIG"
+sh -c '. "$SH_HOME/lib/wifi.sh"; wifi_wpa_save_preflight wlp2s0'
 
 sh -n "$root/bin/wifi"
 sh -n "$root/lib/wifi.sh"
