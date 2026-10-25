@@ -6,7 +6,7 @@ SH_HOME=${SH_HOME:-"$HOME/.config/sh"}
 operation=${0##*/}
 if [ "$operation" = wifi ]; then
     [ "$#" -gt 0 ] || {
-        echo 'Usage: wifi {status|list|info SSID|saved|scan}' >&2
+        echo 'Usage: wifi {status|list|info SSID|saved|scan|connect-saved SSID|disconnect --confirm|forget-saved SSID --confirm}' >&2
         exit 2
     }
     operation=$1
@@ -18,5 +18,8 @@ case "$operation" in
     info|wifi_info) wifi_info "$@" ;;
     saved|wifi_saved) wifi_saved "$@" ;;
     scan|wifi_scan) wifi_scan "$@" ;;
-    *) echo 'Usage: wifi {status|list|info SSID|saved|scan}' >&2; exit 2 ;;
+    connect-saved|wifi_connect_saved) wifi_connect_saved "$@" ;;
+    disconnect|wifi_disconnect) wifi_disconnect "$@" ;;
+    forget-saved|wifi_forget_saved) wifi_forget_saved "$@" ;;
+    *) echo 'Usage: wifi {status|list|info SSID|saved|scan|connect-saved SSID|disconnect --confirm|forget-saved SSID --confirm}' >&2; exit 2 ;;
 esac
