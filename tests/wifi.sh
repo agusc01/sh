@@ -70,7 +70,7 @@ WIFI_WPA_PASSPHRASE="$workspace/bin/wpa_passphrase"; export WIFI_WPA_PASSPHRASE
 WIFI_INTERFACE=wlp2s0; export WIFI_INTERFACE
 MOCK_ACTION_LOG="$workspace/actions"; export MOCK_ACTION_LOG
 
-[ "$(sh "$root/bin/wifi" list)" = "$(printf 'Home:5G\nGuest Lounge')" ]
+[ "$(sh "$root/bin/wifi" list)" = "$(printf 'Home:5G\nGuest Lounge\nNew Network')" ]
 [ "$(sh "$root/bin/wifi" saved)" = Home:5G ]
 sh "$root/bin/wifi" status | grep -F 'State: connected' >/dev/null
 sh "$root/bin/wifi" info 'Home:5G' | grep -F 'Signal: -44 dBm' >/dev/null
