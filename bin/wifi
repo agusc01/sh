@@ -1,0 +1,22 @@
+#!/bin/sh
+# sh-managed: agusc01/sh
+set -eu
+SH_HOME=${SH_HOME:-"$HOME/.config/sh"}
+. "$SH_HOME/lib/wifi.sh"
+operation=${0##*/}
+if [ "$operation" = wifi ]; then
+    [ "$#" -gt 0 ] || {
+        echo 'Usage: wifi {status|list|info SSID|saved|scan}' >&2
+        exit 2
+    }
+    operation=$1
+    shift
+fi
+case "$operation" in
+    status|wifi_status) wifi_status "$@" ;;
+    list|wifi_list) wifi_list "$@" ;;
+    info|wifi_info) wifi_info "$@" ;;
+    saved|wifi_saved) wifi_saved "$@" ;;
+    scan|wifi_scan) wifi_scan "$@" ;;
+    *) echo 'Usage: wifi {status|list|info SSID|saved|scan}' >&2; exit 2 ;;
+esac
