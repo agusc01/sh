@@ -33,13 +33,19 @@ case "$3" in
     list_networks)
         printf 'network id / ssid / bssid / flags\n0\tHome:5G\tany\t[CURRENT]\n'
         [ "${MOCK_DUPLICATE:-0}" = 1 ] && printf '4\tHome:5G\tany\t\n'
+        [ "${MOCK_EXTRA_ENABLED:-0}" = 1 ] && printf '8\tBackupWiFi\tany\t\n'
+        [ "${MOCK_EXTRA_DISABLED:-0}" = 1 ] && printf '9\tDisabledWiFi\tany\t[DISABLED]\n'
         :
         ;;
     scan) echo OK ;;
     add_network) echo 3 ;;
     set_network) printf '%s:%s:%s:%s\n' "$3" "$4" "$5" "$6" >> "$MOCK_ACTION_LOG"; echo OK ;;
-    select_network|disconnect|remove_network|save_config)
-        printf '%s:%s\n' "$3" "${4:-}" >> "$MOCK_ACTION_LOG"
+    select_network|enable_network|disconnect|remove_network|save_config)
+        if [ "$3" = enable_network ]; then
+            printf '%s:%s:%s\n' "$3" "${4:-}" "${5:-}" >> "$MOCK_ACTION_LOG"
+        else
+            printf '%s:%s\n' "$3" "${4:-}" >> "$MOCK_ACTION_LOG"
+        fi
         if [ "$3" = save_config ] && [ "${MOCK_SAVE_FAIL:-0}" = 1 ]; then
             echo FAIL
         elif [ "${MOCK_ACTION_FAIL:-}" = "$3" ]; then
@@ -97,6 +103,28 @@ fi
 sh "$root/bin/wifi" connect-saved 'Home:5G' |
     grep -F 'Connection requested' >/dev/null
 grep -Fx 'select_network:0' "$MOCK_ACTION_LOG" >/dev/null
+# Enabling a saved profile requires explicit opt-in and must not switch links.
+if sh "$root/bin/wifi" enable-saved 'Home:5G' >/dev/null 2>&1; then
+    echo 'Error: Enabling without --confirm succeeded.' >&2; exit 1
+fi
+sh "$root/bin/wifi" enable-saved 'Home:5G' --confirm |
+    grep -F 'without switching' >/dev/null
+grep -Fx 'enable_network:0:no-connect' "$MOCK_ACTION_LOG" >/dev/null
+# Enabled peers must be preserved after select_network; deliberately disabled
+# profiles must not be re-enabled unless the user explicitly requests it.
+MOCK_EXTRA_ENABLED=1; export MOCK_EXTRA_ENABLED
+MOCK_EXTRA_DISABLED=1; export MOCK_EXTRA_DISABLED
+: > "$MOCK_ACTION_LOG"
+sh "$root/bin/wifi" connect-saved 'Home:5G' |
+    grep -F 'previously enabled profiles preserved' >/dev/null
+grep -Fx 'select_network:0' "$MOCK_ACTION_LOG" >/dev/null
+grep -Fx 'enable_network:8:no-connect' "$MOCK_ACTION_LOG" >/dev/null
+if grep -Fx 'enable_network:9:no-connect' "$MOCK_ACTION_LOG" >/dev/null; then
+    echo 'Error: A disabled profile was re-enabled unexpectedly.' >&2; exit 1
+fi
+unset MOCK_EXTRA_ENABLED MOCK_EXTRA_DISABLED
+: > "$MOCK_ACTION_LOG"
+
 sh "$root/bin/wifi" disconnect --confirm |
     grep -F 'disconnect requested' >/dev/null
 grep -Fx 'disconnect:' "$MOCK_ACTION_LOG" >/dev/null
@@ -147,6 +175,34 @@ if sh "$root/bin/wifi" join-supported 'Not in scan' >/dev/null 2>&1; then
     echo 'Error: Stale or unknown SSID was marked joinable.' >&2
     exit 1
 fi
+
+# Joining a new network must preserve prior enabled profiles, too.
+MOCK_EXTRA_ENABLED=1; export MOCK_EXTRA_ENABLED
+MOCK_EXTRA_DISABLED=1; export MOCK_EXTRA_DISABLED
+: > "$MOCK_ACTION_LOG"
+printf 'samplepass123\n' | sh "$root/bin/wifi" join-new 'New Network' |
+    grep -F 'WPA2 connection requested' >/dev/null
+grep -Fx 'select_network:3' "$MOCK_ACTION_LOG" >/dev/null
+grep -Fx 'enable_network:8:no-connect' "$MOCK_ACTION_LOG" >/dev/null
+if grep -Fx 'enable_network:9:no-connect' "$MOCK_ACTION_LOG" >/dev/null; then
+    echo 'Error: New connection woke a disabled profile.' >&2; exit 1
+fi
+unset MOCK_EXTRA_ENABLED MOCK_EXTRA_DISABLED
+: > "$MOCK_ACTION_LOG"
+
+# Unsupported/no-connect failures must not fall back to plain enable_network
+# or incorrectly report that the old profile was restored.
+MOCK_EXTRA_ENABLED=1; export MOCK_EXTRA_ENABLED
+MOCK_ACTION_FAIL=enable_network; export MOCK_ACTION_FAIL
+: > "$MOCK_ACTION_LOG"
+if sh "$root/bin/wifi" connect-saved 'Home:5G' >/dev/null 2>&1; then
+    echo 'Error: Failed profile restoration reported success.' >&2; exit 1
+fi
+if grep -Fx 'enable_network:8:' "$MOCK_ACTION_LOG" >/dev/null; then
+    echo 'Error: Unsafe plain enable_network fallback was attempted.' >&2; exit 1
+fi
+unset MOCK_EXTRA_ENABLED MOCK_ACTION_FAIL
+: > "$MOCK_ACTION_LOG"
 
 # WPA2 profile enrollment consumes the password from stdin, not argv.
 # All secrets here are harmless fixed fixtures used only in mocked tests.

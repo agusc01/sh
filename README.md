@@ -277,3 +277,37 @@ does not prove DHCP or Internet connectivity.
 
 Do not run `wifi_dhcp_renew --confirm` on every switch when this event
 service is already handling DHCP: it is a manual recovery command only.
+
+## Saved Wi-Fi: automatic reconnection without unintended switching
+
+`select_network ID` disables other saved profiles. Prior versions of the
+Wi-Fi helper left other profiles disabled, as confirmed on the Alpine
+notebook, so wpa_supplicant could not reconnect to them automatically.
+
+Now wifi_connect_saved (and the new-profile join flow) snapshots which
+profiles were enabled before selecting another SSID. After select_network,
+the helper restores *only those profiles* using:
+
+    wpa_cli -i wlan0 enable_network ID no-connect
+
+This wpa_supplicant control command enables a profile without asking for
+a second connection immediately. Previously disabled profiles stay disabled.
+For a profile already disabled by older versions, explicitly run:
+
+    wifi_enable_saved 'TeleCentro-76d7' --confirm
+    wpa_cli -i wlan0 list_networks
+
+The helper then calls save_config; saving needs update_config=1 and a
+writable root-owned configuration, as already tested on the notebook.
+Enabling a saved network does NOT mean it will immediately reconnect or
+force a handoff; it permits future automatic selection/fallback. Changes
+should be tested on the notebook before merging.
+
+Do not use `wpa_cli enable_network all` in place of `no-connect` on a
+specific profile: it can unexpectedly select another network. Explicit
+manual connect may still interrupt current Wi-Fi, and DHCP changes should
+continue to be handled by the existing wpa_cli event service.
+
+After saving, verify the configuration file remains root:root mode 600:
+
+    stat -c '%a %U:%G %n' /etc/wpa_supplicant/wpa_supplicant.conf
