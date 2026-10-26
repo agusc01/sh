@@ -3,6 +3,41 @@
 Lightweight POSIX `sh` commands for Alpine Linux, independent of Fish,
 Bash, NetworkManager, `linux-tools`, `linux-setup`, and `linux-doctor`.
 
+## Bluetooth inspection (read-only first milestone)
+
+The Bluetooth backend uses only BlueZ's `bluetoothctl`, with no GUI toolkit,
+Bash, extra background daemon, or privilege escalation in these scripts.
+It does not install packages or change OpenRC services. On Alpine, install
+and configure BlueZ separately (`bluez` and the applicable OpenRC service
+package), then make sure the `bluetooth` service is running and an adapter
+is available; see the [Alpine Bluetooth guide](https://wiki.alpinelinux.org/wiki/Bluetooth).
+
+```sh
+sh "$HOME/.config/sh/install.sh"
+bluetooth_status
+bluetooth_list
+bluetooth_info 'AA:BB:CC:DD:EE:FF'
+```
+
+The aliases `bluetooth status`, `bluetooth list`, and `bluetooth info ADDRESS`
+work as well. `bluetooth_status` reports the default controller, power,
+pairable/discoverable/discovering states. `bluetooth_list` reports **cached**
+devices as `ADDRESS<TAB>NAME` so duplicate names remain distinguishable;
+an empty list is valid when no devices have been discovered. Use an address
+from that list with `bluetooth_info` to inspect its paired, trusted and
+connected status, optionally including signal strength when BlueZ has it.
+
+None of these commands powers on an adapter, starts discovery, pairs,
+connects, trusts or disconnects a device. A fresh scan, pairing/connection
+actions and dmenu/fzf interfaces belong to subsequent milestones. There is
+no implicit `doas`, `rc-service`, or `apk add` in the installer.
+
+Mocked tests (no Bluetooth hardware required):
+
+```sh
+sh tests/bluetooth.sh
+```
+
 ## Wi-Fi inspection and saved-profile management
 
 `sh` does not install OS packages or change network services. The existing
