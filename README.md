@@ -3,7 +3,7 @@
 Lightweight POSIX `sh` commands for Alpine Linux, independent of Fish,
 Bash, NetworkManager, `linux-tools`, `linux-setup`, and `linux-doctor`.
 
-## First module: read-only Wi-Fi
+## Wi-Fi inspection and saved-profile management
 
 `sh` does not install OS packages or change network services. The existing
 `init-alpine/basics/wifi/install.sh` already installs `iw` and
@@ -21,7 +21,8 @@ wifi_scan
 ```
 
 The installer creates `wifi`, `wifi_status`, `wifi_list`, `wifi_info`,
-`wifi_saved`, and `wifi_scan` under `~/.local/bin`. It checks for name
+`wifi_saved`, `wifi_scan`, `wifi_connect_saved`, `wifi_disconnect`,
+and `wifi_forget_saved` under `~/.local/bin`. It checks for name
 collisions before installing and never overwrites unrelated commands.
 Re-run the installer after updating the repository.
 
@@ -43,10 +44,47 @@ management. Alpine's [Wi-Fi guide](https://wiki.alpinelinux.org/wiki/Wi-Fi)
 documents the optional control socket and its access permissions; granting
 access also grants network control privileges, so do not do it casually.
 
-All operations are read-only **except** `wifi_scan`, which triggers a Wi-Fi
-scan without intentionally changing the connection. Connect, disconnect, and
-power operations are reserved for a separate milestone after reviewing
-credentials, permissions and DHCP.
+Inspection commands are read-only **except** `wifi_scan`, which requests a
+scan without intentionally changing the connection.
+
+### Saved-profile actions (explicit network changes)
+
+These commands act only on already-saved wpa_supplicant network profiles. They
+never request passwords, edit configuration files directly, invoke `doas`, or
+restart network services. They need a working, appropriately permissioned
+wpa_supplicant control socket. Access to that socket grants powerful network
+control; never loosen its filesystem permissions just to run these commands.
+
+```sh
+wifi_saved
+wifi_connect_saved 'Home:5G'
+wifi_status   # association is asynchronous
+wifi_disconnect --confirm
+wifi_forget_saved 'Old network' --confirm
+```
+
+- `wifi_connect_saved SSID` issues `select_network <ID>` for exactly one
+  matching saved profile. This **temporarily disables other configured
+  profiles** in wpa_supplicant. It reports that the connection was **requested**,
+  not that authentication or IP configuration succeeded.
+- `wifi_disconnect --confirm` explicitly drops the association and pauses
+  automatic reconnection until a later network control action.
+- `wifi_forget_saved SSID --confirm` removes the profile from the live daemon,
+  then tries `save_config`. Persistence requires `update_config=1` and
+  write permissions; if saving fails, the command returns an error and warns
+  that the profile may reappear after restarting wpa_supplicant.
+- If multiple saved profiles have the same SSID, selection and removal fail
+  rather than guessing which numeric profile to change.
+- DHCP, routes, and DNS remain managed by Alpine's existing networking setup.
+  wpa_supplicant association alone does not guarantee an IP address. Depending
+  on Alpine configuration, you may need its existing `wpa_cli` action hook or
+  networking service to trigger DHCP on network changes.
+
+Creating **new** Wi-Fi profiles, handling WPA2/WPA3 passphrases, and masked
+password prompts are deliberately outside this initial write-enabled step.
+Do not type a new network password into a normal dmenu input field; it is not
+masked. This milestone makes saved networks manageable without exposing secrets.
+
 
 Tests with mocked `iw` and `wpa_cli` (do not modify networking):
 

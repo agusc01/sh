@@ -158,3 +158,108 @@ wifi_scan() {
         echo 'Scan completed.'
     fi
 }
+
+
+# Network-changing commands require an already configured, accessible
+# wpa_supplicant control interface. Never invoke doas or start a daemon.
+wifi_wpa_interface() {
+    write_iface=$(wifi_interface) || return 1
+    wifi_control_available "$write_iface" || {
+        echo 'Error: Wi-Fi changes require access to the wpa_supplicant control socket.' >&2
+        return 1
+    }
+    printf '%s\n' "$write_iface"
+}
+
+wifi_wpa_expect_ok() {
+    expect_iface=$1
+    shift
+    expect_command=$1
+    shift
+    expect_result=$("${WIFI_WPA_CLI:-wpa_cli}" -i "$expect_iface" "$expect_command" "$@" 2>/dev/null) || {
+        printf 'Error: wpa_supplicant command %s failed.\n' "$expect_command" >&2
+        return 1
+    }
+    [ "$expect_result" = OK ] || {
+        printf 'Error: wpa_supplicant rejected %s (%s).\n' "$expect_command" "$expect_result" >&2
+        return 1
+    }
+}
+
+# Resolve a saved SSID to exactly one network ID. Refuse ambiguous profiles,
+# missing profiles, and unexpected replies rather than guessing a network ID.
+wifi_saved_id() {
+    [ "$#" -eq 1 ] && [ -n "$1" ] || {
+        echo 'Usage: wifi_saved_id SSID' >&2
+        return 2
+    }
+    saved_iface=$(wifi_wpa_interface) || return 1
+    saved_rows=$("${WIFI_WPA_CLI:-wpa_cli}" -i "$saved_iface" list_networks 2>/dev/null) || {
+        echo 'Error: Could not list saved Wi-Fi profiles.' >&2
+        return 1
+    }
+    WIFI_LOOKUP_SSID=$1
+    export WIFI_LOOKUP_SSID
+    saved_id=$(printf '%s\n' "$saved_rows" | awk -F '\t' '
+        NR > 1 && NF >= 2 && $2 == ENVIRON["WIFI_LOOKUP_SSID"] {
+            id=$1
+            if (++count > 1) exit
+        }
+        END {
+            if (count > 1) print "AMBIGUOUS"
+            else if (count == 1) print id
+        }')
+    case "$saved_id" in
+        '')
+            printf 'Error: Network is not saved: %s\n' "$1" >&2
+            return 1
+            ;;
+        AMBIGUOUS)
+            printf 'Error: Multiple saved profiles use SSID %s; choose a network ID manually using wpa_cli.\n' "$1" >&2
+            return 1
+            ;;
+        *[!0-9]*)
+            echo 'Error: Invalid saved network ID reported by wpa_supplicant.' >&2
+            return 1
+            ;;
+    esac
+    printf '%s\n' "$saved_id"
+}
+
+wifi_connect_saved() {
+    [ "$#" -eq 1 ] && [ -n "$1" ] || {
+        echo 'Usage: wifi_connect_saved SSID' >&2
+        return 2
+    }
+    connect_id=$(wifi_saved_id "$1") || return 1
+    connect_iface=$(wifi_wpa_interface) || return 1
+    # select_network intentionally disables other profiles in wpa_supplicant.
+    wifi_wpa_expect_ok "$connect_iface" select_network "$connect_id" || return 1
+    printf 'Connection requested for %s. Check wifi_status; DHCP/IP is managed separately.\n' "$1"
+}
+
+wifi_disconnect() {
+    [ "$#" -eq 1 ] && [ "$1" = --confirm ] || {
+        echo 'Usage: wifi_disconnect --confirm' >&2
+        return 2
+    }
+    disconnect_iface=$(wifi_wpa_interface) || return 1
+    wifi_wpa_expect_ok "$disconnect_iface" disconnect || return 1
+    echo 'Wi-Fi disconnect requested. Automatic reconnection is paused until another connect/reconnect command.'
+}
+
+wifi_forget_saved() {
+    [ "$#" -eq 2 ] && [ -n "$1" ] && [ "$2" = --confirm ] || {
+        echo 'Usage: wifi_forget_saved SSID --confirm' >&2
+        return 2
+    }
+    forget_id=$(wifi_saved_id "$1") || return 1
+    forget_iface=$(wifi_wpa_interface) || return 1
+    wifi_wpa_expect_ok "$forget_iface" remove_network "$forget_id" || return 1
+    if ! wifi_wpa_expect_ok "$forget_iface" save_config; then
+        echo 'WARNING: Profile removed from the running daemon but NOT saved to disk.' >&2
+        echo 'Check update_config=1 and write permissions before relying on persistence.' >&2
+        return 1
+    fi
+    printf 'Forgot saved profile: %s\n' "$1"
+}
