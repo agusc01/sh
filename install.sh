@@ -6,13 +6,13 @@ installed_dir="$HOME/.local/share/sh/bin"
 installed_script="$installed_dir/wifi"
 bin_dir="$HOME/.local/bin"
 
-[ -f "$source_script" ] && [ -f "$root/lib/wifi.sh" ] || {
+[ -f "$source_script" ] && [ -f "$root/lib/wifi.sh" ] && [ -f "$root/lib/wifi-net.sh" ] || {
     echo 'Error: Invalid sh checkout.' >&2
     exit 1
 }
 
 # Preflight all commands before changing files.
-for name in wifi wifi_status wifi_list wifi_info wifi_saved wifi_scan wifi_connect_saved wifi_disconnect wifi_forget_saved wifi_join_new wifi_join_supported; do
+for name in wifi wifi_status wifi_list wifi_info wifi_saved wifi_scan wifi_connect_saved wifi_disconnect wifi_forget_saved wifi_join_new wifi_join_supported wifi_ip_status wifi_internet_status wifi_dhcp_renew; do
     target="$bin_dir/$name"
     if [ -e "$target" ] || [ -L "$target" ]; then
         if [ "$(readlink "$target" 2>/dev/null || :)" != "$installed_script" ]; then
@@ -32,7 +32,7 @@ mkdir -vp "$installed_dir"
 mkdir -vp "$bin_dir"
 cp -v "$source_script" "$installed_script"
 chmod +x "$installed_script"
-for name in wifi wifi_status wifi_list wifi_info wifi_saved wifi_scan wifi_connect_saved wifi_disconnect wifi_forget_saved wifi_join_new wifi_join_supported; do
+for name in wifi wifi_status wifi_list wifi_info wifi_saved wifi_scan wifi_connect_saved wifi_disconnect wifi_forget_saved wifi_join_new wifi_join_supported wifi_ip_status wifi_internet_status wifi_dhcp_renew; do
     target="$bin_dir/$name"
     if [ ! -L "$target" ]; then
         ln -sv "$installed_script" "$target"
