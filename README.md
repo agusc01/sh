@@ -91,3 +91,80 @@ Tests with mocked `iw` and `wpa_cli` (do not modify networking):
 ```sh
 sh tests/wifi.sh
 ```
+
+
+### Join a new WPA2-Personal network (preview milestone)
+
+`wifi_join_new SSID` expects a passphrase **on standard input**, never
+as a command-line argument. Supported networks must be visible in the
+current wpa_supplicant scan cache and explicitly advertise WPA2-PSK.
+Open, WPA3-only (SAE-only), WEP and enterprise networks are rejected.
+WPA2/WPA3 transition hotspots (for example `[WPA2-PSK+SAE-CCMP]`) are
+supported through their advertised WPA2-PSK method; we explicitly set
+`key_mgmt WPA-PSK` to avoid accidentally using the SAE method.
+
+Use the **masked** `dmenu_wifi` prompt (suckless `-P`) or the no-echo
+`fzf_wifi` terminal prompt. Do not enter a Wi-Fi password in a normal
+terminal command, a command-line argument, a shell history entry, or an
+unmasked dmenu prompt. The backend rejects direct terminal stdin to prevent
+accidental echoing.
+
+The password flows over stdin to the backend, which sends a quoted
+passphrase directly to interactive `wpa_cli` via stdin (never as a
+command-line argument). This avoids a compatibility problem: some recent
+`wpa_passphrase` builds require a TTY on stdin and reject secure pipes.
+No temporary password files are used. The resulting `wpa_supplicant`
+configuration **can contain the original passphrase in plaintext**
+when `save_config` runs; keep that system file accessible only to root
+or other deliberately authorized administrators.
+
+In this first secure-input milestone passwords must be 8–63 printable
+ASCII bytes. Double quotes and backslashes are rejected until escaping
+can be audited and tested for the interactive `wpa_cli` parser. Error
+messages distinguish invalid password length from a rejected
+`wpa_supplicant` configuration command.
+
+Joining a new network can interrupt the current Wi-Fi link, because
+`select_network` disables the other network profiles while switching.
+Enrollment saves the new profile before requesting the switch, then saves
+the newly enabled state again. Status, authentication, DHCP and DNS must
+be verified separately; the script does not restart networking or configure
+routes. A wrong password may leave the notebook without Wi-Fi until you
+reselect the previous saved profile.
+
+This is not yet a general enterprise or WPA3 configuration system.
+
+For a nonsecret eligibility check, run `wifi_join_supported 'SSID'` (or
+`wifi join-supported 'SSID'`). It returns success only if cached scans
+confirm WPA2-PSK capability without EAP, WEP or OWE ambiguity.
+SAE is permitted *only when the same entry also advertises WPA2-PSK*
+(as in a WPA2/WPA3 transition hotspot). If it fails,
+request `wifi_scan`, then inspect `wifi_info 'SSID'` before attempting
+enrollment. The graphical and terminal menus use this same check to avoid
+prompting for passwords on unsupported networks.
+
+### Temporary WPA2 connection without persistent configuration
+
+When `wpa_cli save_config` returns `FAIL`, the current daemon may not have
+`update_config=1` enabled, or cannot write its actual configuration file.
+Do not silently turn on persistent writes or loosen the control socket permissions.
+
+`wifi_join_new --temporary 'SSID'` uses the same masked-stdin password flow
+but intentionally skips both `save_config` calls. It adds an in-memory network
+profile and requests `select_network`; the profile may disappear after restarting
+`wpa_supplicant`. It may interrupt the current Wi-Fi connection and does not
+guarantee DHCP/IP assignment. This is an explicit alternative, not an automatic
+fallback from a failed persistent join. The normal `wifi_join_new 'SSID'`
+continues to abort before switching if its first `save_config` fails.
+
+To inspect the usual Alpine configuration without printing passwords:
+
+```sh
+ps | grep '[w]pa_supplicant'
+doas grep -nE '^[[:space:]]*update_config[[:space:]]*=' /etc/wpa_supplicant/wpa_supplicant.conf
+```
+
+Check the actual `-c` path in the running process before assuming the above
+file is in use. A missing or zero `update_config` disables persistence.
+Editing the active root-managed file and restarting the daemon should be a
+separate deliberate admin task, since restarting drops the current association.

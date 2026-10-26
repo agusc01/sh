@@ -12,7 +12,7 @@ bin_dir="$HOME/.local/bin"
 }
 
 # Preflight all commands before changing files.
-for name in wifi wifi_status wifi_list wifi_info wifi_saved wifi_scan wifi_connect_saved wifi_disconnect wifi_forget_saved; do
+for name in wifi wifi_status wifi_list wifi_info wifi_saved wifi_scan wifi_connect_saved wifi_disconnect wifi_forget_saved wifi_join_new wifi_join_supported; do
     target="$bin_dir/$name"
     if [ -e "$target" ] || [ -L "$target" ]; then
         if [ "$(readlink "$target" 2>/dev/null || :)" != "$installed_script" ]; then
@@ -32,7 +32,7 @@ mkdir -vp "$installed_dir"
 mkdir -vp "$bin_dir"
 cp -v "$source_script" "$installed_script"
 chmod +x "$installed_script"
-for name in wifi wifi_status wifi_list wifi_info wifi_saved wifi_scan wifi_connect_saved wifi_disconnect wifi_forget_saved; do
+for name in wifi wifi_status wifi_list wifi_info wifi_saved wifi_scan wifi_connect_saved wifi_disconnect wifi_forget_saved wifi_join_new wifi_join_supported; do
     target="$bin_dir/$name"
     if [ ! -L "$target" ]; then
         ln -sv "$installed_script" "$target"
