@@ -1,0 +1,23 @@
+#!/bin/sh
+# sh-managed: agusc01/sh
+set -eu
+
+SH_HOME=${SH_HOME:-"$HOME/.config/sh"}
+. "$SH_HOME/lib/bluetooth.sh"
+
+operation=${0##*/}
+if [ "$operation" = bluetooth ]; then
+    [ "$#" -gt 0 ] || {
+        echo 'Usage: bluetooth {status|list|info ADDRESS}' >&2
+        exit 2
+    }
+    operation=$1
+    shift
+fi
+
+case "$operation" in
+    status|bluetooth_status) bluetooth_status "$@" ;;
+    list|bluetooth_list) bluetooth_list "$@" ;;
+    info|bluetooth_info) bluetooth_info "$@" ;;
+    *) echo 'Usage: bluetooth {status|list|info ADDRESS}' >&2; exit 2 ;;
+esac
