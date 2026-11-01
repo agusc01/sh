@@ -38,6 +38,37 @@ Mocked tests (no Bluetooth hardware required):
 sh tests/bluetooth.sh
 ```
 
+## Bluetooth scan (explicit bounded discovery)
+
+On the real Alpine notebook, BlueZ 5.86 discovered two cached devices with
+`bluetoothctl --timeout 10 scan on` and returned to
+`Discovering: no`. The `bluetooth_scan` command uses this same
+**10-second timeout**, requires the adapter to be powered on, and refuses to
+interfere if another discovery session is already active. It checks that
+BlueZ reported discovery started. Since `Discovering: yes` can persist briefly
+after the command exits, it polls for up to five additional seconds for
+`Discovering: no` before printing the known-device cache:
+
+```sh
+bluetooth_scan
+bluetooth_list
+bluetooth_info 'AA:BB:CC:DD:EE:FF'
+```
+
+The list includes devices remembered from prior scans and may be empty.
+Unnamed BLE devices may show an address-like name. This does not pair, trust,
+connect, disconnect, change adapter discoverability, or install packages.
+It does change radio discovery state **only while explicitly requested**.
+If discovery remains active after the bounded wait, the command returns
+an error. Inspect `bluetoothctl show` before taking further action; the
+script never sends `scan off`, which could interfere with another client.
+
+Mocked tests (no hardware required):
+
+```sh
+sh tests/bluetooth-scan.sh
+```
+
 ## Wi-Fi inspection and saved-profile management
 
 `sh` does not install OS packages or change network services. The existing
