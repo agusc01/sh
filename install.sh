@@ -24,7 +24,7 @@ for name in wifi wifi_status wifi_list wifi_info wifi_saved wifi_scan wifi_conne
         fi
     fi
 done
-for name in bluetooth bluetooth_status bluetooth_list bluetooth_info; do
+for name in bluetooth bluetooth_status bluetooth_list bluetooth_info bluetooth_scan; do
     target="$bin_dir/$name"
     if [ -e "$target" ] || [ -L "$target" ]; then
         if [ "$(readlink "$target" 2>/dev/null || :)" != "$bluetooth_installed" ]; then
@@ -54,7 +54,7 @@ for name in wifi wifi_status wifi_list wifi_info wifi_saved wifi_scan wifi_conne
         ln -sv "$installed_script" "$target"
     fi
 done
-for name in bluetooth bluetooth_status bluetooth_list bluetooth_info; do
+for name in bluetooth bluetooth_status bluetooth_list bluetooth_info bluetooth_scan; do
     target="$bin_dir/$name"
     if [ ! -L "$target" ]; then
         ln -sv "$bluetooth_installed" "$target"

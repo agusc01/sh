@@ -1,6 +1,6 @@
 #!/bin/sh
-# Read-only BlueZ inspection on Alpine Linux, compatible with POSIX sh.
-# No adapter configuration, discovery, pairing, or connection changes.
+# BlueZ inspection and explicit bounded discovery on Alpine Linux (POSIX sh).
+# No adapter power changes, pairing, trust or connection changes.
 
 bluetooth_query() {
     ctl=${BLUETOOTH_CTL:-bluetoothctl}
@@ -96,4 +96,33 @@ bluetooth_info() {
         echo 'Error: Device is not available in the BlueZ cache.' >&2
         return 1
     }
+}
+
+# Explicit, bounded discovery. Only run when the user invokes bluetooth_scan.
+# Never interrupt a scan that was already active before this invocation.
+bluetooth_scan() {
+    [ "$#" -eq 0 ] || { echo 'Usage: bluetooth_scan' >&2; return 2; }
+    details=$(bluetooth_controller_output) || return 1
+    if ! printf '%s\n' "$details" | grep -Eq '^[[:space:]]*Powered: yes[[:space:]]*$'; then
+        echo 'Error: Bluetooth adapter is not powered on.' >&2
+        return 1
+    fi
+    if printf '%s\n' "$details" | grep -Eq '^[[:space:]]*Discovering: yes[[:space:]]*$'; then
+        echo 'Error: Bluetooth discovery is already active; refusing to interfere.' >&2
+        return 1
+    fi
+    printf 'Scanning Bluetooth for 10 seconds...\n'
+    # BlueZ --timeout ends discovery automatically; never start an unbounded scan.
+    scan_output=$(bluetooth_query --timeout 10 scan on) || return 1
+    if ! printf '%s\n' "$scan_output" | grep -F 'Discovery started' >/dev/null; then
+        echo 'Error: BlueZ did not confirm that discovery started.' >&2
+        return 1
+    fi
+    details=$(bluetooth_controller_output) || return 1
+    if ! printf '%s\n' "$details" | grep -Eq '^[[:space:]]*Discovering: no[[:space:]]*$'; then
+        echo 'Error: Discovery did not finish; check bluetoothctl show.' >&2
+        return 1
+    fi
+    printf 'Known devices (BlueZ cache):\n'
+    bluetooth_list
 }
