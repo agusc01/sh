@@ -107,39 +107,7 @@ bluetooth_scan() {
         echo 'Error: Bluetooth adapter is not powered on.' >&2
         return 1
     fi
-    if ! printf '%s\n' "$details" | grep -Eq '^[[:space:]]*Discovering: no[[:space:]]*
-    printf 'Scanning Bluetooth for 10 seconds...\n'
-    # BlueZ --timeout ends discovery automatically; never start an unbounded scan.
-    scan_output=$(bluetooth_query --timeout 10 scan on) || return 1
-    if ! printf '%s\n' "$scan_output" | grep -F 'Discovery started' >/dev/null; then
-        echo 'Error: BlueZ did not confirm that discovery started.' >&2
-        return 1
-    fi
-    # A timed bluetoothctl process can exit before BlueZ reports Discovering: no.
-    # Give the adapter up to five more seconds to settle, then fail closed.
-    remaining=5
-    while :; do
-        details=$(bluetooth_controller_output) || return 1
-        if printf '%s\n' "$details" | grep -Eq '^[[:space:]]*Discovering: no[[:space:]]*
-; then
-            break
-        fi
-        if ! printf '%s\n' "$details" | grep -Eq '^[[:space:]]*Discovering: yes[[:space:]]*
-; then
-            echo 'Error: BlueZ did not report a valid discovery state.' >&2
-            return 1
-        fi
-        if [ "$remaining" -eq 0 ]; then
-            echo 'Error: Discovery is still active; check bluetoothctl show.' >&2
-            return 1
-        fi
-        remaining=$((remaining - 1))
-        sleep 1
-    done
-    printf 'Known devices (BlueZ cache):\n'
-    bluetooth_list
-}
-; then
+    if ! printf '%s\n' "$details" | grep -Eq '^[[:space:]]*Discovering: no[[:space:]]*$'; then
         echo 'Error: Bluetooth discovery is already active or its state is unknown; refusing to interfere.' >&2
         return 1
     fi
@@ -150,17 +118,15 @@ bluetooth_scan() {
         echo 'Error: BlueZ did not confirm that discovery started.' >&2
         return 1
     fi
-    # A timed bluetoothctl process can exit before BlueZ reports Discovering: no.
-    # Give the adapter up to five more seconds to settle, then fail closed.
+    # BlueZ may temporarily report Discovering: yes after bluetoothctl times out.
+    # Poll for up to five additional seconds without stopping any other client's scan.
     remaining=5
     while :; do
         details=$(bluetooth_controller_output) || return 1
-        if printf '%s\n' "$details" | grep -Eq '^[[:space:]]*Discovering: no[[:space:]]*
-; then
+        if printf '%s\n' "$details" | grep -Eq '^[[:space:]]*Discovering: no[[:space:]]*$'; then
             break
         fi
-        if ! printf '%s\n' "$details" | grep -Eq '^[[:space:]]*Discovering: yes[[:space:]]*
-; then
+        if ! printf '%s\n' "$details" | grep -Eq '^[[:space:]]*Discovering: yes[[:space:]]*$'; then
             echo 'Error: BlueZ did not report a valid discovery state.' >&2
             return 1
         fi
